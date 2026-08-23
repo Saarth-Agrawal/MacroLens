@@ -109,9 +109,9 @@ test("uses read public-source text to corroborate a checkable claim", () => {
 
 test("uses independent matching headlines as clearly limited corroboration", () => {
   const result = buildLiveAnalysis("$40 trillion and counting: America's debt problem explained", [
-    { title: "US debt hits $40 trillion", url: "https://news.google.com/one", publisher: "Outlet one", domain: "one.example", date: "2026-08-23" },
+    { title: "U.S. debt hits $40 trillion", url: "https://news.google.com/one", publisher: "Outlet one", domain: "one.example", date: "2026-08-23" },
     { title: "America's debt crosses $40 trillion", url: "https://news.google.com/two", publisher: "Outlet two", domain: "two.example", date: "2026-08-23" },
-    { title: "National debt tops $40 trillion in the US", url: "https://news.google.com/three", publisher: "Outlet three", domain: "three.example", date: "2026-08-23" },
+    { title: "National debt tops $40 trillion in the U.S.", url: "https://news.google.com/three", publisher: "Outlet three", domain: "three.example", date: "2026-08-23" },
   ]);
   assert.equal(result.claims[0].kind, "Evidence-supported inference");
   assert.equal(result.sources.every((source) => source.evidenceRole === "Supports"), true);

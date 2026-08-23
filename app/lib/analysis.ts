@@ -105,7 +105,8 @@ export function decomposeHeadline(headline: string): Claim[] {
 }
 
 function tokens(text: string) {
-  return new Set(text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).map((word) => {
+  const normalised = text.toLowerCase().replace(/\bu\.?\s*s\.?\b/gu, "usa");
+  return new Set(normalised.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).map((word) => {
     if (["america", "american", "us", "united"].includes(word)) return "usa";
     return word;
   }).filter((word) => word.length > 2 && !stopWords.has(word)));
