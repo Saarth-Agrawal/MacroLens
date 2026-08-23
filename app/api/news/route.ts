@@ -1,4 +1,11 @@
-type NewsArticle = { title: string; url: string; publisher: string; domain: string; date: string };
+type NewsArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
+
+const readableHosts = new Set([
+  "www.reuters.com", "reuters.com", "apnews.com", "www.apnews.com", "www.bbc.com", "bbc.com",
+  "www.cnbc.com", "cnbc.com", "www.theguardian.com", "theguardian.com", "www.npr.org", "npr.org",
+  "home.treasury.gov", "fiscaldata.treasury.gov", "www.imf.org", "imf.org", "www.worldbank.org", "worldbank.org",
+  "www.iea.org", "iea.org", "www.oecd.org", "oecd.org", "www.un.org", "un.org", "unctad.org", "www.unctad.org",
+]);
 
 const responseHeaders = {
   "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
@@ -28,6 +35,46 @@ function normaliseDate(value: string) {
   if (/^\d{8}/.test(value)) return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? "Date unavailable" : new Date(parsed).toISOString().slice(0, 10);
+}
+
+function isReadablePublicUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && readableHosts.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function htmlToText(html: string) {
+  return decodeXml(html
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " "));
+}
+
+async function readPublicArticle(article: NewsArticle): Promise<NewsArticle> {
+  if (!isReadablePublicUrl(article.url)) return article;
+  try {
+    const response = await fetch(article.url, {
+      headers: { "Accept": "text/html,application/xhtml+xml;q=0.9", "User-Agent": "Mozilla/5.0 (compatible; MacroLens/4.0; public-source verification prototype)" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(6500),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const length = Number(response.headers.get("content-length") || 0);
+    if (!response.ok || !/text\/html|application\/xhtml\+xml/i.test(contentType) || length > 1_200_000) return article;
+    const text = htmlToText((await response.text()).slice(0, 1_200_000));
+    if (text.length < 180) return article;
+    return { ...article, bodyRead: true, excerpt: text.slice(0, 1400) };
+  } catch {
+    return article;
+  }
+}
+
+async function enrichWithReadableText(articles: NewsArticle[]) {
+  const readable = await Promise.all(articles.slice(0, 5).map(readPublicArticle));
+  return [...readable, ...articles.slice(5)];
 }
 
 function parseRss(xml: string): NewsArticle[] {
@@ -107,7 +154,10 @@ export async function POST(request: Request) {
     const [provider, diagnosticKey] = providers[index];
     if (outcome.status === "fulfilled") {
       diagnostics[diagnosticKey] = outcome.value.length ? "success" : "empty";
-      if (outcome.value.length) return Response.json({ articles: outcome.value, provider, retrievalStatus: "live", evidenceDepth: "headline metadata only", diagnostics }, { headers: responseHeaders });
+      if (outcome.value.length) {
+        const articles = await enrichWithReadableText(outcome.value);
+        return Response.json({ articles, provider, retrievalStatus: "live", evidenceDepth: articles.some((article) => article.bodyRead) ? "public article text plus metadata" : "headline metadata only", diagnostics }, { headers: responseHeaders });
+      }
     } else {
       diagnostics[diagnosticKey] = diagnostic(outcome.reason);
     }

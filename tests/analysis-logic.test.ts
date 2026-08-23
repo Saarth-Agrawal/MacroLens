@@ -81,6 +81,32 @@ test("activates the exact insufficient-evidence safeguard", () => {
   assert.ok(result.uncertain.includes("There is currently insufficient reliable evidence to verify this claim."));
 });
 
+test("uses read public-source text to corroborate a checkable claim", () => {
+  const result = buildLiveAnalysis("$40 trillion and counting: America's debt problem explained", [
+    {
+      title: "US national debt reaches $40 trillion",
+      url: "https://home.treasury.gov/example",
+      publisher: "US Treasury",
+      domain: "home.treasury.gov",
+      date: "2026-08-23",
+      bodyRead: true,
+      excerpt: "America's debt has reached about $40 trillion, according to the latest Treasury statement.",
+    },
+    {
+      title: "America's debt tops $40 trillion",
+      url: "https://www.reuters.com/example",
+      publisher: "Reuters",
+      domain: "www.reuters.com",
+      date: "2026-08-23",
+      bodyRead: true,
+      excerpt: "America's national debt rose above $40 trillion this week, according to Treasury data.",
+    },
+  ]);
+  assert.equal(result.claims[0].kind, "Confirmed fact");
+  assert.equal(result.sources.filter((source) => source.evidenceRole === "Supports").length, 2);
+  assert.match(result.shortFrame, /article page/i);
+});
+
 test("ranks the central large Hindi region above surrounding article text", () => {
   const lines = [
     { text: "लीक से हटकर", confidence: 95, bbox: { x0: 413, y0: 65, x1: 1106, y1: 247 }, rowHeight: 182 },

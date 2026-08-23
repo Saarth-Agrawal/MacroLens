@@ -1,7 +1,7 @@
 import type { AnalysisResult, Claim, ClaimCategory, EvidenceRole, EvidenceSource, SourceType } from "../data/demoCases";
 
 export type DetectedLanguage = "English" | "Hindi" | "Marathi";
-export type RetrievedArticle = { title: string; url: string; publisher: string; domain: string; date: string };
+export type RetrievedArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
 
 const stopWords = new Set([
   "the", "a", "an", "and", "or", "as", "after", "because", "amid", "following", "due", "to", "of", "in", "on", "for", "with", "at", "by",
@@ -45,6 +45,12 @@ function claim(id: string, text: string, category: ClaimCategory, kind: Claim["k
 export function decomposeHeadline(headline: string): Claim[] {
   const clean = headline.replace(/\s+/g, " ").trim();
   if (!clean) return [];
+
+  const amountExplainer = clean.match(/^\$?([\d,.]+)\s*(trillion|billion|million)\b[^:—-]*[:—-]\s*(.+?)(?:'s|’s)\s+(debt)\b/i);
+  if (amountExplainer) {
+    const [, amount, scale, country, subject] = amountExplainer;
+    return [claim("C1", `${country.trim()}'s ${subject.toLowerCase()} is about $${amount} ${scale.toLowerCase()}.`, "Event")];
+  }
 
   const english = clean.match(/^(.+?)\s+(after|because|as|amid|following|due to)\s+(.+)$/i);
   if (english) {
@@ -110,6 +116,17 @@ function overlap(left: string, right: string) {
   return count;
 }
 
+function corroboratesClaim(claim: Claim, article: RetrievedArticle) {
+  if (!article.bodyRead || !article.excerpt) return false;
+  const claimTokens = [...tokens(claim.text)];
+  if (!claimTokens.length) return false;
+  const articleTokens = tokens(`${article.title} ${article.excerpt}`);
+  const matched = claimTokens.filter((word) => articleTokens.has(word));
+  const numberTokens = claimTokens.filter((word) => /\d/.test(word));
+  const numericMatch = numberTokens.every((word) => articleTokens.has(word));
+  return numericMatch && matched.length / claimTokens.length >= 0.6;
+}
+
 export function sourceTypeFor(domain: string, publisher: string): SourceType {
   const value = `${domain} ${publisher}`.toLowerCase();
   if (/rbi\.org|\.gov\.|\.gov$|imf\.org|worldbank\.org|iea\.org|unctad\.org|un\.org|oecd\.org|reserve bank|international monetary fund|international energy agency|un trade/.test(value)) return "Official / primary";
@@ -121,8 +138,9 @@ export function makeEvidenceSources(claims: Claim[], articles: RetrievedArticle[
   return articles.slice(0, 8).map((article, index) => {
     const ranked = claims.map((claim) => ({ id: claim.id, score: overlap(claim.text, article.title) })).sort((a, b) => b.score - a.score);
     const bestScore = ranked[0]?.score ?? 0;
-    const relatedClaims = ranked.filter((item) => item.score === bestScore && bestScore >= 2).map((item) => item.id);
-    const evidenceRole: EvidenceRole = relatedClaims.length ? "Adds context" : "Insufficient evidence";
+    const corroboratedClaims = claims.filter((claim) => corroboratesClaim(claim, article)).map((claim) => claim.id);
+    const relatedClaims = corroboratedClaims.length ? corroboratedClaims : ranked.filter((item) => item.score === bestScore && bestScore >= 2).map((item) => item.id);
+    const evidenceRole: EvidenceRole = corroboratedClaims.length ? "Supports" : relatedClaims.length ? "Adds context" : "Insufficient evidence";
     return {
       id: `S${index + 1}`,
       title: article.title,
@@ -132,8 +150,12 @@ export function makeEvidenceSources(claims: Claim[], articles: RetrievedArticle[
       sourceType: sourceTypeFor(article.domain, article.publisher),
       relatedClaims,
       evidenceRole,
-      note: evidenceRole === "Adds context"
-        ? "Title and metadata appear related. MacroLens has not read the article body, so this source is context—not claim verification."
+      note: evidenceRole === "Supports"
+        ? `A public article page was read. Matching excerpt: “${article.excerpt?.slice(0, 360)}”`
+        : evidenceRole === "Adds context"
+        ? article.bodyRead
+          ? "A public article page was read, but its available text did not corroborate this decomposed claim."
+          : "Title and metadata appear related. MacroLens could not read this article page, so this source is context—not claim verification."
         : "The retrieved title is not close enough to verify a decomposed claim.",
     };
   });
@@ -143,10 +165,18 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
   const language = detectLanguage(headline);
   const claims = decomposeHeadline(headline);
   const sources = makeEvidenceSources(claims, articles);
-  const contextualIds = sources.filter((source) => source.evidenceRole === "Adds context").map((source) => source.id);
+  const contextualIds = sources.filter((source) => source.evidenceRole === "Adds context" || source.evidenceRole === "Supports").map((source) => source.id);
+  const readSources = sources.filter((source) => source.evidenceRole === "Supports");
   const hasContext = contextualIds.length > 0;
   const warning = "There is currently insufficient reliable evidence to verify this claim.";
   const linkedClaimIds = new Set(sources.flatMap((source) => source.relatedClaims));
+  const assessedClaims = claims.map((claim) => {
+    const supporting = sources.filter((source) => source.evidenceRole === "Supports" && source.relatedClaims.includes(claim.id));
+    const hasPrimary = supporting.some((source) => source.sourceType === "Official / primary");
+    const kind: Claim["kind"] = hasPrimary || supporting.length >= 2 ? "Confirmed fact" : supporting.length === 1 ? "Evidence-supported inference" : claim.kind;
+    return { ...claim, kind, evidenceIds: sources.filter((source) => source.relatedClaims.includes(claim.id)).map((source) => source.id) };
+  });
+  const confirmed = assessedClaims.filter((claim) => claim.kind === "Confirmed fact").map((claim) => `${claim.text} This is corroborated by ${claim.evidenceIds.filter((id) => sources.find((source) => source.id === id)?.evidenceRole === "Supports").join(" and ")}.`);
 
   return {
     id: `live-${Date.now()}`,
@@ -154,18 +184,20 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     headline,
     detectedLanguage: language,
     updated: `${sources.length ? "Live analysis" : "Live retrieval unavailable"} · ${new Date().toISOString().slice(0, 10)}`,
-    shortFrame: hasContext
+    shortFrame: readSources.length
+      ? `${readSources.length} public article page${readSources.length === 1 ? " was" : "s were"} read and matched against decomposed claims. Claims without direct textual corroboration remain unverified.`
+      : hasContext
       ? `${sources.length} recent public source${sources.length === 1 ? " was" : "s were"} retrieved and linked at claim level. Their titles add context; article-body verification remains incomplete.`
       : warning,
-    claims: claims.map((claim) => ({ ...claim, evidenceIds: sources.filter((source) => source.relatedClaims.includes(claim.id)).map((source) => source.id) })),
-    confirmed: [],
+    claims: assessedClaims,
+    confirmed,
     uncertain: [
       warning,
-      "Retrieved titles may mention the same topic without proving the headline’s wording or causal link.",
+      "A matching article excerpt corroborates wording, not every causal implication in a headline.",
       "No contradiction decision is made without article-level evidence.",
     ],
     nodes: [
-      { id: "signal", layer: "Signal", title: "Claim awaits verification", summary: claims[0]?.text || headline, kind: "Unverified claim", confidence: "Low", evidenceIds: contextualIds, uncertainty: warning },
+      { id: "signal", layer: "Signal", title: confirmed.length ? "Claim corroborated by source text" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: assessedClaims[0]?.kind || "Unverified claim", confidence: confirmed.length ? "Medium" : "Low", evidenceIds: contextualIds, uncertainty: confirmed.length ? "Corroboration is limited to the fetched public-source text and does not prove every implication." : warning },
       { id: "mechanism", layer: "Mechanism", title: "Possible transmission channel", summary: "Identify the price, incentive, institution or behaviour that would carry the effect forward.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No article-body evidence has verified this connection." },
       { id: "dependency", layer: "Hidden dependency", title: "Assumption not yet tested", summary: "The implied explanation may depend on timing, geography, market structure or another event omitted from the headline.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "The necessary assumption has not been established." },
       { id: "consequence", layer: "Wider consequence", title: "Consequences remain conditional", summary: "Potential effects should not be presented as outcomes until the mechanism and exposure are supported.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "Magnitude, direction and affected groups remain open." },
@@ -175,7 +207,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     winners: ["No evidence-supported winner identified"],
     losers: ["No evidence-supported loser identified"],
     stressTest: {
-      challengingEvidence: ["No article-body counter-evidence was available in this retrieval."],
+      challengingEvidence: [readSources.length ? "Read source text can corroborate the stated claim, but it may not establish every wider cause or consequence." : "No article-body counter-evidence was available in this retrieval."],
       alternatives: ["A different event may explain the same outcome.", "The headline may be opinion, satire, prediction or correlation rather than a factual causal statement."],
       missingInformation: ["Primary-source confirmation", "Article-body evidence", ...claims.filter((claim) => !linkedClaimIds.has(claim.id)).map((claim) => `Evidence for ${claim.id}`)],
       changeConditions: ["A primary source confirms the event", "Independent reporting agrees after reviewing the same facts", "Evidence directly tests the causal link"],
@@ -183,14 +215,14 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     confidence: {
       level: "Low",
       reasons: [
-        `${sources.length} headline-feed result${sources.length === 1 ? "" : "s"} retrieved; full article bodies were not read.`,
-        "Source agreement and contradiction cannot be established from titles alone.",
-        hasContext ? "Some titles add context, but evidence completeness is low." : "No sufficiently related source title was found.",
+        `${readSources.length} public article page${readSources.length === 1 ? "" : "s"} read; ${sources.length - readSources.length} result${sources.length - readSources.length === 1 ? "" : "s"} remained metadata-only.`,
+        confirmed.length ? "At least one claim has direct text corroboration from the fetched sources." : "No claim met the direct-text corroboration threshold.",
+        hasContext ? "Source pages can still be incomplete, blocked, updated, or contextually limited." : "No sufficiently related source title was found.",
       ],
     },
     sources,
     limitations: sources.length
-      ? ["This result contains headline metadata only, not article-body verification or a pre-verified demo case.", "Evidence roles are conservative: related titles add context but do not automatically support a claim.", "Use a curated case for the reliable 45-second competition demonstration."]
+      ? ["Only public, fetchable source text was read; paywalled, blocked and dynamically rendered pages remain metadata-only.", "Text corroboration verifies the stated claim, not every implied causal link or future consequence.", "Open the linked sources and review their full context before relying on a result."]
       : ["Retrieval was unavailable; no live metadata or evidence-backed causal analysis was produced.", "No curated evidence was substituted for the failed custom request.", "Use Retry or select a clearly labelled pre-verified demonstration."],
   };
 }
