@@ -3,6 +3,8 @@ type NewsArticle = { title: string; url: string; publisher: string; domain: stri
 const readableHosts = new Set([
   "www.reuters.com", "reuters.com", "apnews.com", "www.apnews.com", "www.bbc.com", "bbc.com",
   "www.cnbc.com", "cnbc.com", "www.theguardian.com", "theguardian.com", "www.npr.org", "npr.org",
+  "www.ndtv.com", "ndtv.com", "www.axios.com", "axios.com", "timesofindia.indiatimes.com", "www.aljazeera.com", "aljazeera.com",
+  "www.cbsnews.com", "cbsnews.com", "www.bloomberg.com", "bloomberg.com", "www.pbs.org", "pbs.org",
   "home.treasury.gov", "fiscaldata.treasury.gov", "www.imf.org", "imf.org", "www.worldbank.org", "worldbank.org",
   "www.iea.org", "iea.org", "www.oecd.org", "oecd.org", "www.un.org", "un.org", "unctad.org", "www.unctad.org",
 ]);

@@ -105,7 +105,10 @@ export function decomposeHeadline(headline: string): Claim[] {
 }
 
 function tokens(text: string) {
-  return new Set(text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((word) => word.length > 2 && !stopWords.has(word)));
+  return new Set(text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).map((word) => {
+    if (["america", "american", "us", "united"].includes(word)) return "usa";
+    return word;
+  }).filter((word) => word.length > 2 && !stopWords.has(word)));
 }
 
 function overlap(left: string, right: string) {
@@ -125,6 +128,15 @@ function corroboratesClaim(claim: Claim, article: RetrievedArticle) {
   const numberTokens = claimTokens.filter((word) => /\d/.test(word));
   const numericMatch = numberTokens.every((word) => articleTokens.has(word));
   return numericMatch && matched.length / claimTokens.length >= 0.6;
+}
+
+function headlineCorroboratesClaim(claim: Claim, article: RetrievedArticle) {
+  const claimTokens = [...tokens(claim.text)];
+  if (!claimTokens.length) return false;
+  const titleTokens = tokens(article.title);
+  const matched = claimTokens.filter((word) => titleTokens.has(word));
+  const numberTokens = claimTokens.filter((word) => /\d/.test(word));
+  return numberTokens.every((word) => titleTokens.has(word)) && matched.length / claimTokens.length >= 0.6;
 }
 
 export function sourceTypeFor(domain: string, publisher: string): SourceType {
@@ -172,8 +184,10 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
   const linkedClaimIds = new Set(sources.flatMap((source) => source.relatedClaims));
   const assessedClaims = claims.map((claim) => {
     const supporting = sources.filter((source) => source.evidenceRole === "Supports" && source.relatedClaims.includes(claim.id));
+    const headlineConsensus = articles.filter((article) => headlineCorroboratesClaim(claim, article));
+    const independentHeadlinePublishers = new Set(headlineConsensus.map((article) => article.domain.toLowerCase())).size;
     const hasPrimary = supporting.some((source) => source.sourceType === "Official / primary");
-    const kind: Claim["kind"] = hasPrimary || supporting.length >= 2 ? "Confirmed fact" : supporting.length === 1 ? "Evidence-supported inference" : claim.kind;
+    const kind: Claim["kind"] = hasPrimary || supporting.length >= 2 ? "Confirmed fact" : supporting.length === 1 || independentHeadlinePublishers >= 3 ? "Evidence-supported inference" : claim.kind;
     return { ...claim, kind, evidenceIds: sources.filter((source) => source.relatedClaims.includes(claim.id)).map((source) => source.id) };
   });
   const confirmed = assessedClaims.filter((claim) => claim.kind === "Confirmed fact").map((claim) => `${claim.text} This is corroborated by ${claim.evidenceIds.filter((id) => sources.find((source) => source.id === id)?.evidenceRole === "Supports").join(" and ")}.`);
@@ -193,7 +207,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     confirmed,
     uncertain: [
       warning,
-      "A matching article excerpt corroborates wording, not every causal implication in a headline.",
+      "Multiple independent headlines can corroborate a simple factual statement, but only read source text can substantiate its full wording or causal implication.",
       "No contradiction decision is made without article-level evidence.",
     ],
     nodes: [
@@ -216,7 +230,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
       level: "Low",
       reasons: [
         `${readSources.length} public article page${readSources.length === 1 ? "" : "s"} read; ${sources.length - readSources.length} result${sources.length - readSources.length === 1 ? "" : "s"} remained metadata-only.`,
-        confirmed.length ? "At least one claim has direct text corroboration from the fetched sources." : "No claim met the direct-text corroboration threshold.",
+        confirmed.length ? "At least one claim has direct text corroboration from the fetched sources." : assessedClaims.some((claim) => claim.kind === "Evidence-supported inference") ? "At least one simple claim has independent headline-level corroboration; article-text verification was unavailable." : "No claim met the direct-text corroboration threshold.",
         hasContext ? "Source pages can still be incomplete, blocked, updated, or contextually limited." : "No sufficiently related source title was found.",
       ],
     },

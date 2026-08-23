@@ -107,6 +107,17 @@ test("uses read public-source text to corroborate a checkable claim", () => {
   assert.match(result.shortFrame, /article page/i);
 });
 
+test("uses independent matching headlines as clearly limited corroboration", () => {
+  const result = buildLiveAnalysis("$40 trillion and counting: America's debt problem explained", [
+    { title: "US debt hits $40 trillion", url: "https://news.google.com/one", publisher: "Outlet one", domain: "one.example", date: "2026-08-23" },
+    { title: "America's debt crosses $40 trillion", url: "https://news.google.com/two", publisher: "Outlet two", domain: "two.example", date: "2026-08-23" },
+    { title: "National debt tops $40 trillion in the US", url: "https://news.google.com/three", publisher: "Outlet three", domain: "three.example", date: "2026-08-23" },
+  ]);
+  assert.equal(result.claims[0].kind, "Evidence-supported inference");
+  assert.equal(result.sources.every((source) => source.evidenceRole === "Adds context"), true);
+  assert.match(result.confidence.reasons[1], /headline-level corroboration/i);
+});
+
 test("ranks the central large Hindi region above surrounding article text", () => {
   const lines = [
     { text: "लीक से हटकर", confidence: 95, bbox: { x0: 413, y0: 65, x1: 1106, y1: 247 }, rowHeight: 182 },
