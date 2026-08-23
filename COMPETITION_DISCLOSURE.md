@@ -29,13 +29,14 @@ The runtime does not claim that the causal map itself is a trained neural networ
 | TypeScript 5.9.3 | Type checking | Apache-2.0; no licence fee |
 | Tesseract.js 7.0.0 | Browser OCR | Apache-2.0; no licence fee |
 | Inter, Sora and Noto Sans Devanagari via Fontsource | Latin and Devanagari typography | OFL-1.1; self-hosted in the bundle |
-| GDELT DOC 2.0 | Public recent headline metadata | Public service; no API key or paid plan used |
+| Tavily Search | Live public-source search and clean parsed text | Optional server-side API key; usage/plan must be disclosed before competition deployment |
+| GDELT DOC 2.0 | Public recent headline metadata fallback | Public service; no API key or paid plan used |
 | Google News RSS | Retrieval fallback | Public feed; no API key or paid plan used |
 | RBI, IMF, World Bank, IEA and St. Louis Fed pages | Primary/context evidence | Public pages; linked, not republished |
 | Reuters article links | Independent reporting | Public article links and short paraphrases; no paid data feed |
 | Cloudflare/Vinext Sites runtime | Hosting/build target | Existing project runtime; no app-level paid API dependency |
 
-No paid API key, proprietary dataset, stock image, font licence or paid production dependency is configured in the active application path. This statement covers the audited code and package lock on 22 August 2026; it should be re-run after any dependency or hosting change.
+Tavily is configured only through a server-side environment variable and may consume plan credits. No Tavily key is committed to this repository. Re-audit provider pricing, quotas and competition eligibility before deployment.
 
 ## Data and privacy
 
@@ -43,12 +44,13 @@ No paid API key, proprietary dataset, stock image, font licence or paid producti
 - Images are displayed with a temporary blob URL and are not sent to a MacroLens API.
 - The blob URL is revoked when replaced, cleared or when the page is closed.
 - The server receives only a cleaned search query for custom live retrieval.
+- When configured, Tavily receives the custom query and retrieves public-source text for claim matching.
 - The current version has no user accounts, database-backed scan history or analytics.
 
 ## Known limitations to disclose
 
-- Live retrieval receives article titles and metadata, not complete article bodies.
-- Therefore live sources are labelled only “Adds context” or “Insufficient evidence”; they are not automatically classified as supporting or contradicting a claim.
+- Tavily may return cleaned public-source text, but it cannot read every page; paywalled, blocked and incomplete sources remain metadata-only.
+- Live sources are labelled “Supports” only when returned public text directly matches a decomposed claim. No causal implication is treated as verified merely because a source mentions the same topic.
 - Full contradiction detection, satire classification and arbitrary-claim verification require article-level evidence and human review.
 - Full-result Hindi and Marathi translation is not complete; curated short previews are machine-generated and labelled.
 - OCR accuracy depends on crop, angle, typography and lighting. Users must confirm the extracted text.

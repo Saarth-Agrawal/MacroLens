@@ -2,7 +2,7 @@
 
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { demoCases, findDemoCase, type AnalysisResult, type CausalNode, type EvidenceSource, type StatementKind } from "./data/demoCases";
-import { buildLiveAnalysis, detectLanguage, searchQueryFor, type RetrievedArticle } from "./lib/analysis";
+import { buildLiveAnalysis, detectLanguage, type RetrievedArticle } from "./lib/analysis";
 import { cropCanvas, prepareDocumentImage } from "./lib/documentImage";
 import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlternative, cleanOcrText, mergeLayoutAndDetail, validateHeadline, type CropRegion, type HeadlineCandidate, type OcrLineBox } from "./lib/headlineOcr";
 
@@ -246,8 +246,8 @@ export default function Home() {
 
     try {
       setPipelineStage("Retrieving evidence");
-      setPipelineNote("Searching recent public feeds from the deployed server, then the browser-safe GDELT fallback. Titles are not treated as article-body proof.");
-      const retrieval = await retrieveArticles(searchQueryFor(cleanHeadline));
+      setPipelineNote("Searching and reading public source text with Tavily, then using conservative public-feed fallbacks if needed.");
+      const retrieval = await retrieveArticles(cleanHeadline);
       setPipelineStage("Linking evidence");
       setPipelineNote("Linking related source titles conservatively and marking evidence gaps…");
       const liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
@@ -751,13 +751,13 @@ export default function Home() {
         <div className="method-heading"><span className="section-index">03 / METHOD &amp; TRANSPARENCY</span><h2>AI assists judgement. It does not replace it.</h2><p>The competition build exposes its retrieval depth, evidence role and uncertainty at every important step.</p></div>
         <div className="method-grid">
           <article><span>01</span><h3>Claim extraction</h3><p>Curated cases use reviewed claim sets. Custom headlines use conservative rule-based decomposition; causal connectors become hypotheses.</p></article>
-          <article><span>02</span><h3>Retrieval</h3><p>METADATA ONLY RETRIEVED means titles and dates were found but article bodies were not verified. If both source feeds fail, one compact RETRIEVAL UNAVAILABLE state replaces the analysis interface.</p></article>
+          <article><span>02</span><h3>Retrieval</h3><p>When Tavily returns public source text, MacroLens matches that text to each claim. METADATA ONLY RETRIEVED means only titles and dates were available. If retrieval fails, one compact RETRIEVAL UNAVAILABLE state replaces the analysis interface.</p></article>
           <article><span>03</span><h3>AI usage</h3><p>Tesseract.js first detects layout with sparse-text segmentation, then rereads only the selected region. Character confidence and headline-selection confidence remain separate.</p></article>
           <article><span>04</span><h3>Privacy</h3><p>Uploaded images are processed in the browser, shown via a temporary object URL and not sent to the MacroLens server.</p></article>
           <article><span>05</span><h3>Confidence</h3><p>High, Medium or Low reflects source quality, agreement, recency, completeness and conflict—not fabricated precision.</p></article>
           <article><span>06</span><h3>Capability boundary</h3><p>CURATED DEMO cases are manually checked. Metadata is not claim verification. Unavailable retrieval generates no causal story, and causal hypotheses are never presented as proven causation.</p></article>
         </div>
-        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>No paid API, dataset, image, font or production dependency is configured in the audited build. Re-audit after any dependency change.</small></div>
+        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily is an optional server-side API integration for public-source retrieval. Re-audit usage, pricing and disclosures after any provider change.</small></div>
       </section>
 
       <footer className="site-footer"><div><span className="brand-mark">ML</span><p><strong>MacroLens</strong><small>See beyond the story. Understand the system.</small></p></div><span>HKU AI+ Challenge · Competition build under review · August 2026</span></footer>

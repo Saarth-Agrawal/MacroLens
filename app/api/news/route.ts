@@ -56,6 +56,7 @@ function htmlToText(html: string) {
 }
 
 async function readPublicArticle(article: NewsArticle): Promise<NewsArticle> {
+  if (article.bodyRead) return article;
   if (!isReadablePublicUrl(article.url)) return article;
   try {
     const response = await fetch(article.url, {
@@ -131,6 +132,45 @@ async function fromGoogleNews(query: string): Promise<NewsArticle[]> {
   return parseRss(await response.text());
 }
 
+type TavilyResult = { title?: string; url?: string; content?: string; raw_content?: string; published_date?: string };
+
+async function fromTavily(query: string, apiKey: string): Promise<NewsArticle[]> {
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query,
+      topic: "general",
+      search_depth: "basic",
+      chunks_per_source: 3,
+      max_results: 8,
+      include_answer: false,
+      include_raw_content: "text",
+      include_images: false,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`TAVILY_HTTP_${response.status}`);
+  const payload = await response.json() as { results?: TavilyResult[] };
+  return (payload.results ?? []).slice(0, 8).flatMap((item) => {
+    const url = safeWebUrl(item.url || "");
+    const title = (item.title || "").trim().slice(0, 240);
+    if (!url || !title) return [];
+    let domain = "Source publisher";
+    try { domain = new URL(url).hostname.replace(/^www\./, ""); } catch { /* validated above */ }
+    const sourceText = (item.raw_content || item.content || "").replace(/\s+/g, " ").trim();
+    return [{
+      title,
+      url,
+      publisher: domain,
+      domain,
+      date: normaliseDate(item.published_date || ""),
+      bodyRead: sourceText.length >= 80,
+      excerpt: sourceText.slice(0, 1400) || undefined,
+    }];
+  });
+}
+
 function diagnostic(error: unknown) {
   if (error instanceof DOMException && error.name === "TimeoutError") return "timeout";
   if (error instanceof Error && /_HTTP_\d+/.test(error.message)) return error.message.toLowerCase();
@@ -146,10 +186,12 @@ export async function POST(request: Request) {
   const query = body.query?.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 220);
   if (!query) return Response.json({ articles: [], provider: "none", limitation: "A search query is required." }, { status: 400, headers: responseHeaders });
 
-  // These are the two providers already disclosed by MacroLens. Run them in
-  // parallel so a temporary failure from one does not delay a usable result
-  // from the other, while preserving the same data-sharing boundary.
-  const providers = [["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const;
+  const tavilyKey = process.env.TAVILY_API_KEY;
+  // Tavily returns the clean text it read from real source pages. Public feeds
+  // remain a no-key fallback when that service is not configured or unavailable.
+  const providers = tavilyKey
+    ? [["Tavily public-source search", "tavily", (value: string) => fromTavily(value, tavilyKey)], ["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const
+    : [["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const;
   const settled = await Promise.allSettled(providers.map(([, , load]) => load(query)));
   const diagnostics: Record<string, string> = {};
   for (const [index, outcome] of settled.entries()) {

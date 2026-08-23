@@ -11,7 +11,7 @@ The competition flow turns a typed, pasted or scanned headline into checkable cl
 - Next.js 16.3.2, React 19 and TypeScript
 - Vinext/Vite build targeting a Cloudflare Worker
 - Tesseract.js 7 on-device OCR (`eng`, `hin`, `mar`)
-- Public GDELT DOC 2.0 retrieval with a clearly labelled Google News RSS fallback
+- Tavily public-source search and clean-text retrieval when `TAVILY_API_KEY` is configured, with GDELT DOC 2.0 and Google News RSS fallbacks
 - No database, accounts or image uploads to the server
 - Three fixed pre-verified competition cases in `app/data/demoCases.ts`
 - Conservative live metadata mode for arbitrary headlines
@@ -19,7 +19,7 @@ The competition flow turns a typed, pasted or scanned headline into checkable cl
 ## Reliability contract
 
 - Curated and live results are never presented as the same thing.
-- Live retrieval reads titles and metadata only; it cannot mark a source as supporting or contradicting a claim.
+- Live sources can support a claim only when Tavily returns matching public-source text; otherwise titles remain clearly labelled metadata/context only.
 - Every causal node exposes its statement type, confidence category, evidence links and uncertainty.
 - Missing evidence activates the exact insufficient-evidence safeguard.
 - OCR text must be reviewed and confirmed before analysis.
