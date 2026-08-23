@@ -188,12 +188,14 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
   const claims = decomposeHeadline(headline);
   const sources = makeEvidenceSources(claims, articles);
   const contextualIds = sources.filter((source) => source.evidenceRole === "Adds context" || source.evidenceRole === "Supports").map((source) => source.id);
-  const readSources = sources.filter((source) => source.evidenceRole === "Supports");
+  const fullTextSources = sources.filter((source) => source.verificationDepth === "full-text");
+  const fullTextSupportingSources = fullTextSources.filter((source) => source.evidenceRole === "Supports");
+  const headlineConsensusSources = sources.filter((source) => source.verificationDepth === "headline-consensus");
   const hasContext = contextualIds.length > 0;
   const warning = "There is currently insufficient reliable evidence to verify this claim.";
   const linkedClaimIds = new Set(sources.flatMap((source) => source.relatedClaims));
   const assessedClaims = claims.map((claim) => {
-    const supporting = sources.filter((source) => source.evidenceRole === "Supports" && source.verificationDepth === "full-text" && source.relatedClaims.includes(claim.id));
+    const supporting = fullTextSupportingSources.filter((source) => source.relatedClaims.includes(claim.id));
     const headlineConsensus = articles.filter((article) => headlineCorroboratesClaim(claim, article));
     const independentHeadlinePublishers = new Set(headlineConsensus.map((article) => article.domain.toLowerCase())).size;
     const hasPrimary = supporting.some((source) => source.sourceType === "Official / primary");
@@ -201,6 +203,40 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     return { ...claim, kind, evidenceIds: sources.filter((source) => source.relatedClaims.includes(claim.id)).map((source) => source.id) };
   });
   const confirmed = assessedClaims.filter((claim) => claim.kind === "Confirmed fact").map((claim) => `${claim.text} This is corroborated by ${claim.evidenceIds.filter((id) => sources.find((source) => source.id === id)?.evidenceRole === "Supports").join(" and ")}.`);
+  const directSupportFor = (claim: Claim) => fullTextSupportingSources.filter((source) => source.relatedClaims.includes(claim.id));
+  const highConfidenceClaim = assessedClaims.find((claim) => {
+    const directSupport = directSupportFor(claim);
+    const independentPublishers = new Set(directSupport.map((source) => source.publisher.trim().toLowerCase()).filter(Boolean));
+    return directSupport.some((source) => source.sourceType === "Official / primary") || independentPublishers.size >= 2;
+  });
+  const directSupportForHighConfidenceClaim = highConfidenceClaim ? directSupportFor(highConfidenceClaim) : [];
+  const directSupportPublisherCount = new Set(directSupportForHighConfidenceClaim.map((source) => source.publisher.trim().toLowerCase()).filter(Boolean)).size;
+  const confidenceLevel = highConfidenceClaim
+    ? "High"
+    : fullTextSupportingSources.length || headlineConsensusSources.length
+    ? "Medium"
+    : "Low";
+  const metadataOnlyCount = sources.length - fullTextSources.length;
+  const sourceReadSummary = `${fullTextSources.length} public article page${fullTextSources.length === 1 ? " was" : "s were"} read; ${metadataOnlyCount} result${metadataOnlyCount === 1 ? " remained" : "s remained"} metadata-only.`;
+  const confidenceReasons = confidenceLevel === "High"
+    ? [
+      sourceReadSummary,
+      `${directSupportPublisherCount} independent public source${directSupportPublisherCount === 1 ? " directly corroborates" : "s directly corroborate"} ${highConfidenceClaim?.id}.`,
+      "High confidence applies to that stated factual claim only; wider causes, consequences and predictions still need separate evidence.",
+    ]
+    : confidenceLevel === "Medium"
+    ? [
+      sourceReadSummary,
+      fullTextSupportingSources.length
+        ? "Direct source text supports a claim, but the support is not yet independently corroborated."
+        : "At least one simple claim has independent headline-level corroboration; article-text verification was unavailable.",
+      "Source pages can still be incomplete, blocked, updated, or contextually limited.",
+    ]
+    : [
+      sourceReadSummary,
+      "No claim met the direct-text corroboration threshold.",
+      hasContext ? "Source pages can still be incomplete, blocked, updated, or contextually limited." : "No sufficiently related source title was found.",
+    ];
 
   return {
     id: `live-${Date.now()}`,
@@ -208,8 +244,8 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     headline,
     detectedLanguage: language,
     updated: `${sources.length ? "Live analysis" : "Live retrieval unavailable"} · ${new Date().toISOString().slice(0, 10)}`,
-    shortFrame: readSources.length
-      ? `${readSources.length} public article page${readSources.length === 1 ? " was" : "s were"} read and matched against decomposed claims. Claims without direct textual corroboration remain unverified.`
+    shortFrame: fullTextSources.length
+      ? `${fullTextSources.length} public article page${fullTextSources.length === 1 ? " was" : "s were"} read and matched against decomposed claims. Claims without direct textual corroboration remain unverified.`
       : hasContext
       ? `${sources.length} recent public source${sources.length === 1 ? " was" : "s were"} retrieved and linked at claim level. Their titles add context; article-body verification remains incomplete.`
       : warning,
@@ -221,7 +257,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
       "No contradiction decision is made without article-level evidence.",
     ],
     nodes: [
-      { id: "signal", layer: "Signal", title: confirmed.length ? "Claim corroborated by source text" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: assessedClaims[0]?.kind || "Unverified claim", confidence: confirmed.length ? "Medium" : "Low", evidenceIds: contextualIds, uncertainty: confirmed.length ? "Corroboration is limited to the fetched public-source text and does not prove every implication." : warning },
+      { id: "signal", layer: "Signal", title: confirmed.length ? "Claim corroborated by source text" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: assessedClaims[0]?.kind || "Unverified claim", confidence: confidenceLevel, evidenceIds: contextualIds, uncertainty: confirmed.length ? "Corroboration is limited to the fetched public-source text and does not prove every implication." : warning },
       { id: "mechanism", layer: "Mechanism", title: "Possible transmission channel", summary: "Identify the price, incentive, institution or behaviour that would carry the effect forward.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No article-body evidence has verified this connection." },
       { id: "dependency", layer: "Hidden dependency", title: "Assumption not yet tested", summary: "The implied explanation may depend on timing, geography, market structure or another event omitted from the headline.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "The necessary assumption has not been established." },
       { id: "consequence", layer: "Wider consequence", title: "Consequences remain conditional", summary: "Potential effects should not be presented as outcomes until the mechanism and exposure are supported.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "Magnitude, direction and affected groups remain open." },
@@ -231,18 +267,14 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     winners: ["No evidence-supported winner identified"],
     losers: ["No evidence-supported loser identified"],
     stressTest: {
-      challengingEvidence: [readSources.length ? "Read source text can corroborate the stated claim, but it may not establish every wider cause or consequence." : "No article-body counter-evidence was available in this retrieval."],
+      challengingEvidence: [fullTextSources.length ? "Read source text can corroborate the stated claim, but it may not establish every wider cause or consequence." : "No article-body counter-evidence was available in this retrieval."],
       alternatives: ["A different event may explain the same outcome.", "The headline may be opinion, satire, prediction or correlation rather than a factual causal statement."],
       missingInformation: ["Primary-source confirmation", "Article-body evidence", ...claims.filter((claim) => !linkedClaimIds.has(claim.id)).map((claim) => `Evidence for ${claim.id}`)],
       changeConditions: ["A primary source confirms the event", "Independent reporting agrees after reviewing the same facts", "Evidence directly tests the causal link"],
     },
     confidence: {
-      level: "Low",
-      reasons: [
-        `${readSources.length} public article page${readSources.length === 1 ? "" : "s"} read; ${sources.length - readSources.length} result${sources.length - readSources.length === 1 ? "" : "s"} remained metadata-only.`,
-        confirmed.length ? "At least one claim has direct text corroboration from the fetched sources." : assessedClaims.some((claim) => claim.kind === "Evidence-supported inference") ? "At least one simple claim has independent headline-level corroboration; article-text verification was unavailable." : "No claim met the direct-text corroboration threshold.",
-        hasContext ? "Source pages can still be incomplete, blocked, updated, or contextually limited." : "No sufficiently related source title was found.",
-      ],
+      level: confidenceLevel,
+      reasons: confidenceReasons,
     },
     sources,
     limitations: sources.length

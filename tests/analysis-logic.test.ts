@@ -103,6 +103,8 @@ test("uses read public-source text to corroborate a checkable claim", () => {
     },
   ]);
   assert.equal(result.claims[0].kind, "Confirmed fact");
+  assert.equal(result.confidence.level, "High");
+  assert.match(result.confidence.reasons[1], /2 independent public sources directly corroborate C1/i);
   assert.equal(result.sources.filter((source) => source.evidenceRole === "Supports").length, 2);
   assert.match(result.shortFrame, /article page/i);
 });
