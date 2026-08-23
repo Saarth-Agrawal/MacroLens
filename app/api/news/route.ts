@@ -97,21 +97,20 @@ export async function POST(request: Request) {
   const query = body.query?.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 220);
   if (!query) return Response.json({ articles: [], provider: "none", limitation: "A search query is required." }, { status: 400, headers: responseHeaders });
 
+  // These are the two providers already disclosed by MacroLens. Run them in
+  // parallel so a temporary failure from one does not delay a usable result
+  // from the other, while preserving the same data-sharing boundary.
+  const providers = [["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const;
+  const settled = await Promise.allSettled(providers.map(([, , load]) => load(query)));
   const diagnostics: Record<string, string> = {};
-  try {
-    const articles = await fromGoogleNews(query);
-    if (articles.length) return Response.json({ articles, provider: "Google News RSS", retrievalStatus: "live", evidenceDepth: "headline metadata only", diagnostics: { googleNews: "success" } }, { headers: responseHeaders });
-    diagnostics.googleNews = "empty";
-  } catch (error) {
-    diagnostics.googleNews = diagnostic(error);
-  }
-
-  try {
-    const articles = await fromGdelt(query);
-    if (articles.length) return Response.json({ articles, provider: "GDELT DOC 2.0", retrievalStatus: "live", evidenceDepth: "headline metadata only", diagnostics: { ...diagnostics, gdelt: "success" } }, { headers: responseHeaders });
-    diagnostics.gdelt = "empty";
-  } catch (error) {
-    diagnostics.gdelt = diagnostic(error);
+  for (const [index, outcome] of settled.entries()) {
+    const [provider, diagnosticKey] = providers[index];
+    if (outcome.status === "fulfilled") {
+      diagnostics[diagnosticKey] = outcome.value.length ? "success" : "empty";
+      if (outcome.value.length) return Response.json({ articles: outcome.value, provider, retrievalStatus: "live", evidenceDepth: "headline metadata only", diagnostics }, { headers: responseHeaders });
+    } else {
+      diagnostics[diagnosticKey] = diagnostic(outcome.reason);
+    }
   }
 
   return Response.json({

@@ -14,6 +14,10 @@ type CropDrag = { mode: "new" | "move" | "resize"; startX: number; startY: numbe
 const stageOrder: PipelineStage[] = ["Decomposing claims", "Retrieving evidence", "Linking evidence", "Complete"];
 const fullPageCrop: CropRegion = { left: 0, top: 0, width: 100, height: 100 };
 
+function normaliseHeadline(value: string) {
+  return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
 const labels: Record<ExplanationLanguage, { output: string }> = {
   English: { output: "Explanation language" },
   Hindi: { output: "व्याख्या की भाषा" },
@@ -94,6 +98,7 @@ export default function Home() {
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrConfirmed, setOcrConfirmed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // A language change and an immediate upload can occur in the same browser
   // task. React state is intentionally asynchronous, so the OCR pipeline must
   // read a synchronously updated ref or it can start with the previous
@@ -119,6 +124,7 @@ export default function Home() {
   const requiresOcrConfirmation = Boolean(imageName) && (!ocrConfirmed || !headlinePlausible);
   const retrievalUnavailable = result.mode === "live" && result.sources.length === 0;
   const resultStateLabel = result.mode === "curated" ? "CURATED DEMO · PRE-VERIFIED" : result.sources.length ? "METADATA ONLY RETRIEVED" : "LIVE RETRIEVAL UNAVAILABLE";
+  const hasCurrentResult = normaliseHeadline(headline) === normaliseHeadline(result.headline);
 
   useEffect(() => () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -167,6 +173,7 @@ export default function Home() {
     setHeadlinePlausible(true);
     setOcrConfirmed(false);
     setErrorMessage("");
+    setMobileNavOpen(false);
   };
 
   const retrieveArticles = async (query: string) => {
@@ -425,11 +432,15 @@ export default function Home() {
     const file = event.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setOcrStatus("That file is not a supported image. Choose a JPG, PNG, WEBP or phone photo.");
+      const message = "That file is not a supported image. Choose a JPG, PNG, WEBP or phone photo.";
+      setOcrStatus(message);
+      setErrorMessage(message);
       return;
     }
     if (file.size > 8 * 1024 * 1024) {
-      setOcrStatus("This image is over 8 MB. Crop or compress it, then try again.");
+      const message = "This image is over 8 MB. Crop or compress it, then try again.";
+      setOcrStatus(message);
+      setErrorMessage(message);
       return;
     }
 
@@ -532,7 +543,8 @@ export default function Home() {
           <span className="brand-mark" aria-hidden="true">ML</span>
           <span><strong>MacroLens</strong><small>Evidence-linked media intelligence</small></span>
         </a>
-        <nav aria-label="Primary navigation"><a href="#workspace">Analyse</a><a href="#analysis-result">Result</a><a href="#method">Method</a></nav>
+        <button className="mobile-nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded={mobileNavOpen} aria-controls="primary-navigation" onClick={() => setMobileNavOpen((open) => !open)}>Menu</button>
+        <nav id="primary-navigation" className={mobileNavOpen ? "open" : ""} aria-label="Primary navigation"><a href="#workspace" onClick={() => setMobileNavOpen(false)}>Analyse</a><a href="#analysis-result" onClick={() => setMobileNavOpen(false)}>Result</a><a href="#method" onClick={() => setMobileNavOpen(false)}>Method</a></nav>
         <span className="competition-chip"><i /> Competition MVP</span>
       </header>
 
@@ -569,16 +581,20 @@ export default function Home() {
             <div className="headline-field">
               <div className="field-label"><label htmlFor="headline">Headline or claim</label><span>Source language: {detectedInputLanguage}</span></div>
               <textarea ref={headlineInputRef} id="headline" rows={4} value={headline} onChange={(event) => {
-                const value = event.target.value;
+                const value = event.target.value.slice(0, 500);
                 setHeadline(value);
+                if (normaliseHeadline(value) !== normaliseHeadline(result.headline)) {
+                  setPipelineStage("Ready");
+                  setPipelineNote("Custom headline ready. Analyse it to replace the previous result.");
+                }
                 if (imageName) {
                   setOcrConfirmed(false);
                   const validation = validateHeadline(value, headlineSelectionConfidence ?? 100, true);
                   setHeadlinePlausible(validation.plausible);
                   if (!validation.plausible && value.trim()) setOcrStatus(validation.warning);
                 }
-              }} placeholder="Paste a headline, or switch to Lens to scan a newspaper…" maxLength={500} />
-              <div className="field-actions"><span>{headline.length}/500</span><button onClick={resetInput}>Clear input</button></div>
+              }} placeholder="Paste a headline, or switch to Lens to scan a newspaper…" maxLength={500} aria-describedby="headline-count" />
+              <div id="headline-count" className="field-actions"><span>{headline.length}/500</span><button onClick={resetInput}>Clear input</button></div>
             </div>
 
             <div className={`lens-panel ${inputMode === "lens" ? "visible" : ""}`}>
@@ -617,6 +633,8 @@ export default function Home() {
                   setOcrConfirmed(true);
                   setErrorMessage("");
                   setOcrStatus("Headline confirmed. Ready to analyse.");
+                  setPipelineStage("Ready");
+                  setPipelineNote("OCR headline confirmed. Custom headline ready to analyse.");
                 } else {
                   setOcrConfirmed(false);
                   setErrorMessage(validation.warning);
@@ -646,7 +664,11 @@ export default function Home() {
           <div className={`mode-badge ${result.mode} ${retrievalUnavailable ? "unavailable" : result.mode === "live" ? "metadata" : ""}`}><i />{resultStateLabel}</div>
         </div>
 
-        {retrievalUnavailable ? <article className="retrieval-failure content-panel">
+        {!hasCurrentResult ? <article className="retrieval-failure content-panel pending-result">
+          <div className="failure-kicker"><span>Analysis pending</span><small>Source language: {detectedInputLanguage}</small></div>
+          <h2>Your custom headline is ready to analyse.</h2>
+          <div className="failure-explanation"><strong>The previous result has been cleared.</strong><p>Run analysis to create a new, clearly labelled result for this headline.</p></div>
+        </article> : retrievalUnavailable ? <article className="retrieval-failure content-panel">
           <div className="failure-kicker"><span>Retrieval unavailable</span><small>Source language: {result.detectedLanguage}</small></div>
           <h2 className={result.headline.length > 180 ? "very-long" : result.headline.length > 90 ? "long" : ""}>“{result.headline}”</h2>
           <div className="failure-explanation"><strong>No evidence-backed analysis was generated.</strong><p>The public source feeds returned zero usable results. MacroLens has not created a causal map, winners, losers or a Stress Test from unsupported commentary.</p></div>

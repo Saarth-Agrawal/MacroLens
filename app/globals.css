@@ -87,6 +87,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visi
 .site-nav nav { display: flex; gap: 28px; }
 .site-nav nav a { color: var(--muted); font-size: 11px; transition: color 200ms ease; }
 .site-nav nav a:hover { color: white; }
+.mobile-nav-toggle { display: none; border: 1px solid var(--line-strong); border-radius: 8px; background: rgba(255,255,255,.035); color: white; font: 700 10px "Sora", sans-serif; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; padding: 9px 11px; }
 .competition-chip { justify-self: end; border: 1px solid var(--line); border-radius: 999px; padding: 8px 11px; color: #c5d0df; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; display: flex; align-items: center; gap: 7px; }
 .competition-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 12px rgba(57,217,162,.8); }
 
@@ -406,7 +407,10 @@ td small { display: block; color: var(--faint); margin-top: 5px; }
 }
 
 @media (max-width: 900px) {
-  .site-nav { grid-template-columns: 1fr auto; }.site-nav nav { display: none; }
+  .site-nav { position: relative; grid-template-columns: 1fr auto; }.mobile-nav-toggle { display: block; }
+  .site-nav nav { display: none; position: absolute; z-index: 10; top: calc(100% + 8px); right: 0; left: 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 13px; background: #0c1627; box-shadow: 0 16px 32px rgba(0,0,0,.28); }
+  .site-nav nav.open { display: grid; gap: 3px; }
+  .site-nav nav a { padding: 11px; border-radius: 8px; color: #d9e1ed; }.site-nav nav a:hover { background: rgba(255,255,255,.06); }
   .intro-shell { grid-template-columns: 1fr; gap: 32px; padding-top: 48px; }
   .input-layout { grid-template-columns: 1fr; }
   .lens-panel { opacity: 1; }
