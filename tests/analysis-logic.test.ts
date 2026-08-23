@@ -114,7 +114,8 @@ test("uses independent matching headlines as clearly limited corroboration", () 
     { title: "National debt tops $40 trillion in the US", url: "https://news.google.com/three", publisher: "Outlet three", domain: "three.example", date: "2026-08-23" },
   ]);
   assert.equal(result.claims[0].kind, "Evidence-supported inference");
-  assert.equal(result.sources.every((source) => source.evidenceRole === "Adds context"), true);
+  assert.equal(result.sources.every((source) => source.evidenceRole === "Supports"), true);
+  assert.equal(result.sources.every((source) => source.verificationDepth === "headline-consensus"), true);
   assert.match(result.confidence.reasons[1], /headline-level corroboration/i);
 });
 

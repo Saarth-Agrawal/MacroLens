@@ -123,8 +123,9 @@ export default function Home() {
   const translatedFrame = explanationLanguage === "English" ? result.shortFrame : result.translatedFrame?.[explanationLanguage];
   const requiresOcrConfirmation = Boolean(imageName) && (!ocrConfirmed || !headlinePlausible);
   const retrievalUnavailable = result.mode === "live" && result.sources.length === 0;
-  const readSourceCount = result.sources.filter((source) => source.evidenceRole === "Supports").length;
-  const resultStateLabel = result.mode === "curated" ? "CURATED DEMO · PRE-VERIFIED" : readSourceCount ? "PUBLIC SOURCE TEXT READ" : result.sources.length ? "METADATA ONLY RETRIEVED" : "LIVE RETRIEVAL UNAVAILABLE";
+  const readSourceCount = result.sources.filter((source) => source.verificationDepth === "full-text").length;
+  const consensusSourceCount = result.sources.filter((source) => source.verificationDepth === "headline-consensus").length;
+  const resultStateLabel = result.mode === "curated" ? "CURATED DEMO · PRE-VERIFIED" : readSourceCount ? "PUBLIC SOURCE TEXT READ" : consensusSourceCount ? "INDEPENDENT HEADLINES CORROBORATE" : result.sources.length ? "METADATA ONLY RETRIEVED" : "LIVE RETRIEVAL UNAVAILABLE";
   const hasCurrentResult = normaliseHeadline(headline) === normaliseHeadline(result.headline);
 
   useEffect(() => () => {

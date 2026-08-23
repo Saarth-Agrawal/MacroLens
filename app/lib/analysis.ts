@@ -147,12 +147,18 @@ export function sourceTypeFor(domain: string, publisher: string): SourceType {
 }
 
 export function makeEvidenceSources(claims: Claim[], articles: RetrievedArticle[]): EvidenceSource[] {
+  const metadataConsensusClaims = new Set(claims.filter((claim) => {
+    const publishers = new Set(articles.filter((article) => headlineCorroboratesClaim(claim, article)).map((article) => article.domain.toLowerCase()));
+    return publishers.size >= 3;
+  }).map((claim) => claim.id));
   return articles.slice(0, 8).map((article, index) => {
     const ranked = claims.map((claim) => ({ id: claim.id, score: overlap(claim.text, article.title) })).sort((a, b) => b.score - a.score);
     const bestScore = ranked[0]?.score ?? 0;
     const corroboratedClaims = claims.filter((claim) => corroboratesClaim(claim, article)).map((claim) => claim.id);
+    const consensusClaims = claims.filter((claim) => metadataConsensusClaims.has(claim.id) && headlineCorroboratesClaim(claim, article)).map((claim) => claim.id);
     const relatedClaims = corroboratedClaims.length ? corroboratedClaims : ranked.filter((item) => item.score === bestScore && bestScore >= 2).map((item) => item.id);
-    const evidenceRole: EvidenceRole = corroboratedClaims.length ? "Supports" : relatedClaims.length ? "Adds context" : "Insufficient evidence";
+    const supportedClaims = corroboratedClaims.length ? corroboratedClaims : consensusClaims;
+    const evidenceRole: EvidenceRole = supportedClaims.length ? "Supports" : relatedClaims.length ? "Adds context" : "Insufficient evidence";
     return {
       id: `S${index + 1}`,
       title: article.title,
@@ -160,10 +166,13 @@ export function makeEvidenceSources(claims: Claim[], articles: RetrievedArticle[
       date: article.date || "Date unavailable",
       url: article.url,
       sourceType: sourceTypeFor(article.domain, article.publisher),
-      relatedClaims,
+      relatedClaims: supportedClaims.length ? supportedClaims : relatedClaims,
       evidenceRole,
+      verificationDepth: corroboratedClaims.length ? "full-text" : consensusClaims.length ? "headline-consensus" : undefined,
       note: evidenceRole === "Supports"
-        ? `A public article page was read. Matching excerpt: “${article.excerpt?.slice(0, 360)}”`
+        ? corroboratedClaims.length
+          ? `A public article page was read. Matching excerpt: “${article.excerpt?.slice(0, 360)}”`
+          : "This source is one of at least three independent headlines that directly match the same simple factual claim. Article text was not read."
         : evidenceRole === "Adds context"
         ? article.bodyRead
           ? "A public article page was read, but its available text did not corroborate this decomposed claim."
@@ -183,7 +192,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
   const warning = "There is currently insufficient reliable evidence to verify this claim.";
   const linkedClaimIds = new Set(sources.flatMap((source) => source.relatedClaims));
   const assessedClaims = claims.map((claim) => {
-    const supporting = sources.filter((source) => source.evidenceRole === "Supports" && source.relatedClaims.includes(claim.id));
+    const supporting = sources.filter((source) => source.evidenceRole === "Supports" && source.verificationDepth === "full-text" && source.relatedClaims.includes(claim.id));
     const headlineConsensus = articles.filter((article) => headlineCorroboratesClaim(claim, article));
     const independentHeadlinePublishers = new Set(headlineConsensus.map((article) => article.domain.toLowerCase())).size;
     const hasPrimary = supporting.some((source) => source.sourceType === "Official / primary");

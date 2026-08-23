@@ -14,6 +14,7 @@ export type EvidenceSource = {
   sourceType: SourceType;
   relatedClaims: string[];
   evidenceRole: EvidenceRole;
+  verificationDepth?: "full-text" | "headline-consensus";
   note: string;
 };
 
