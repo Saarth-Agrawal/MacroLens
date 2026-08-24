@@ -1,8 +1,9 @@
 "use client";
-
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { demoCases, findDemoCase, type AnalysisResult, type CausalNode, type ConfidenceLevel, type EvidenceSource, type NodeLayer, type StatementKind } from "./data/demoCases";
+import ResultExperience from "./components/ResultExperience";
+import { demoCases, findDemoCase, type AnalysisResult, type UserProfile } from "./data/demoCases";
 import { buildLiveAnalysis, detectLanguage, type RetrievedArticle } from "./lib/analysis";
+import { userProfiles } from "./lib/resultExperience";
 import { cropCanvas, prepareDocumentImage } from "./lib/documentImage";
 import { buildEconomicLensQuery } from "./lib/economicLens";
 import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlternative, cleanOcrText, mergeLayoutAndDetail, validateHeadline, type CropRegion, type HeadlineCandidate, type OcrLineBox } from "./lib/headlineOcr";
@@ -18,51 +19,6 @@ const fullPageCrop: CropRegion = { left: 0, top: 0, width: 100, height: 100 };
 function analysisInputKey(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
 }
-
-const labels: Record<ExplanationLanguage, { output: string }> = {
-  English: { output: "Explanation language" },
-  Hindi: { output: "व्याख्या की भाषा" },
-  Marathi: { output: "स्पष्टीकरणाची भाषा" },
-};
-
-function kindClass(kind: StatementKind) {
-  if (kind === "Confirmed fact") return "confirmed";
-  if (kind === "Evidence-supported inference") return "inference";
-  if (kind === "Causal hypothesis") return "hypothesis";
-  return "unverified";
-}
-
-function roleClass(role: EvidenceSource["evidenceRole"]) {
-  if (role === "Supports") return "supports";
-  if (role === "Contradicts") return "contradicts";
-  if (role === "Adds context") return "context";
-  return "insufficient";
-}
-
-// Plain-language framing for the consumer-facing "story" layer. The underlying
-// claim/evidence/uncertainty architecture is unchanged — this only relabels it.
-const storyQuestion: Record<NodeLayer, string> = {
-  Signal: "What happened?",
-  Mechanism: "Why?",
-  "Hidden dependency": "What could change this?",
-  "Wider consequence": "What happens next?",
-  Relevance: "Why should you care?",
-};
-
-function sureness(level: ConfidenceLevel | undefined) {
-  if (level === "High") return "Very sure";
-  if (level === "Medium") return "Somewhat sure";
-  if (level === "Low") return "Not very sure";
-  return "Unclear";
-}
-
-function verdictCopy(level: ConfidenceLevel) {
-  if (level === "High") return { tone: "certain", label: "Well-supported" };
-  if (level === "Medium") return { tone: "mixed", label: "Partly supported" };
-  return { tone: "uncertain", label: "Limited evidence" };
-}
-
-const careLabels = ["YOU", "BUSINESS", "INDIA", "WORLD"];
 
 function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -106,8 +62,6 @@ export default function Home() {
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const [explanationLanguage, setExplanationLanguage] = useState<ExplanationLanguage>("English");
   const [ocrLanguage, setOcrLanguage] = useState<ExplanationLanguage>("English");
-  const [selectedNodeId, setSelectedNodeId] = useState("signal");
-  const [selectedSourceId, setSelectedSourceId] = useState("S1");
   const [pipelineStage, setPipelineStage] = useState<PipelineStage>("Ready");
   const [pipelineNote, setPipelineNote] = useState("Three pre-verified demos are ready. Any custom headline can be examined through the business and economics lens.");
   const [isAnalysing, setIsAnalysing] = useState(false);
@@ -130,10 +84,8 @@ export default function Home() {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrConfirmed, setOcrConfirmed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [deepDiveOpen, setDeepDiveOpen] = useState(false);
-  const [showFullMap, setShowFullMap] = useState(false);
-  const [changeTestOpen, setChangeTestOpen] = useState(false);
   const [shareStatus, setShareStatus] = useState("");
+  const [selectedProfile, setSelectedProfile] = useState<UserProfile>("General reader");
   // A language change and an immediate upload can occur in the same browser
   // task. React state is intentionally asynchronous, so the OCR pipeline must
   // read a synchronously updated ref or it can start with the previous
@@ -150,19 +102,7 @@ export default function Home() {
   const analysisRunRef = useRef(0);
   const activeRetrievalControllerRef = useRef<AbortController | null>(null);
 
-  const selectedNode = useMemo(() => result.nodes.find((node) => node.id === selectedNodeId) ?? result.nodes[0], [result, selectedNodeId]);
-  const selectedSource = useMemo(() => result.sources.find((source) => source.id === selectedSourceId) ?? result.sources[0], [result, selectedSourceId]);
-  const linkedSources = useMemo(() => result.sources.filter((source) => selectedNode?.evidenceIds.includes(source.id)), [result, selectedNode]);
-  const confirmedEvidenceIds = useMemo(() => [...new Set(result.claims.filter((claim) => claim.kind === "Confirmed fact").flatMap((claim) => claim.evidenceIds))], [result]);
-  const relevanceNode = useMemo(() => result.nodes.find((node) => node.layer === "Relevance"), [result]);
-  const signalNode = useMemo(() => result.nodes.find((node) => node.layer === "Signal"), [result]);
-  const mechanismNode = useMemo(() => result.nodes.find((node) => node.layer === "Mechanism"), [result]);
-  const dependencyNode = useMemo(() => result.nodes.find((node) => node.layer === "Hidden dependency"), [result]);
-  const consequenceNode = useMemo(() => result.nodes.find((node) => node.layer === "Wider consequence"), [result]);
-  const storyNodes = useMemo(() => [signalNode, mechanismNode, consequenceNode, relevanceNode].filter((node): node is CausalNode => Boolean(node)), [signalNode, mechanismNode, consequenceNode, relevanceNode]);
-  const stressSources = useMemo(() => result.sources.filter((source) => source.evidenceRole === "Contradicts" || source.evidenceRole === "Adds context"), [result]);
   const detectedInputLanguage = useMemo(() => detectLanguage(headline), [headline]);
-  const translatedFrame = explanationLanguage === "English" ? result.shortFrame : result.translatedFrame?.[explanationLanguage];
   const requiresOcrConfirmation = Boolean(imageName) && (!ocrConfirmed || !headlinePlausible);
   const hasCurrentResult = resultIsFresh && analysisInputKey(headline) === analysisInputKey(result.headline);
   const retrievalUnavailable = hasCurrentResult && result.mode === "live" && result.sources.length === 0;
@@ -183,9 +123,6 @@ export default function Home() {
     : result.mode === "live"
     ? "metadata"
     : "";
-  const hasEvidenceConflict = result.sources.some((source) => source.evidenceRole === "Contradicts");
-  const hasSupportedSignal = result.claims.some((claim) => claim.kind === "Confirmed fact" || claim.kind === "Evidence-supported inference");
-  const canRenderCausalSurface = result.mode === "curated" || (!hasEvidenceConflict && hasSupportedSignal);
 
   useEffect(() => () => {
     analysisRunRef.current += 1;
@@ -210,7 +147,7 @@ export default function Home() {
     }, { threshold: 0.1, rootMargin: "0px 0px -60px 0px" });
     document.querySelectorAll(".reveal:not(.is-visible)").forEach((element) => observer.observe(element));
     return () => observer.disconnect();
-  }, [hasCurrentResult, deepDiveOpen, showFullMap, changeTestOpen, canRenderCausalSurface]);
+  }, [hasCurrentResult]);
 
   const cancelPendingAnalysis = () => {
     analysisRunRef.current += 1;
@@ -258,8 +195,6 @@ export default function Home() {
     setHeadline(demo.headline);
     setResult(demo);
     setResultIsFresh(true);
-    setSelectedNodeId(demo.nodes[0].id);
-    setSelectedSourceId(demo.sources[0]?.id || "");
     setPipelineStage("Complete");
     setPipelineNote("Curated demo case loaded. It is pre-verified and is not represented as live retrieval.");
     setInputMode("text");
@@ -341,8 +276,6 @@ export default function Home() {
       if (analysisRunRef.current !== runId) return;
       setResult(demo);
       setResultIsFresh(true);
-      setSelectedNodeId(demo.nodes[0].id);
-      setSelectedSourceId(demo.sources[0].id);
       setPipelineStage("Complete");
       setPipelineNote("Curated demo case loaded. It is pre-verified and is not represented as live retrieval.");
       setIsAnalysing(false);
@@ -361,8 +294,6 @@ export default function Home() {
       const liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
       setResult(liveResult);
       setResultIsFresh(true);
-      setSelectedNodeId(liveResult.nodes[0].id);
-      setSelectedSourceId(liveResult.sources[0]?.id || "");
       setPipelineStage(retrieval.articles.length ? "Complete" : "Fallback ready");
       setPipelineNote(retrieval.articles.length
         ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}. Unrated sites and metadata-only results do not affect confidence.`
@@ -372,8 +303,6 @@ export default function Home() {
       const fallback = buildLiveAnalysis(cleanHeadline, []);
       setResult(fallback);
       setResultIsFresh(true);
-      setSelectedNodeId(fallback.nodes[0].id);
-      setSelectedSourceId("");
       setPipelineStage("Fallback ready");
       setPipelineNote("Live retrieval failed. No blank screen and no invented answer: use Retry or one of the curated demos.");
     } finally {
@@ -648,14 +577,10 @@ export default function Home() {
 
   const endCrop = () => { cropDragRef.current = null; };
 
-  const selectNode = (node: CausalNode) => {
-    setSelectedNodeId(node.id);
-    if (node.evidenceIds[0]) setSelectedSourceId(node.evidenceIds[0]);
-  };
-
   const shareResult = async () => {
-    const frame = translatedFrame || result.shortFrame;
-    const text = `MacroLens\n"${result.headline}"\n\n${frame}\n\n${result.sources.length} evidence source${result.sources.length === 1 ? "" : "s"} · macrolens`;
+    const frame = explanationLanguage === "English" ? result.bottomLine.explanation : result.translatedFrame?.[explanationLanguage] ?? result.bottomLine.explanation;
+    const count = result.bottomLine.independentSourceCount;
+    const text = `MacroLens\n"${result.headline}"\n\n${frame}\n\n${result.bottomLine.evidenceStatus} · ${count} independent usable source organisation${count === 1 ? "" : "s"}`;
     try {
       const nav = navigator as Navigator & { share?: (data: { title?: string; text?: string }) => Promise<void> };
       if (nav.share) {
@@ -672,23 +597,6 @@ export default function Home() {
       }
       window.setTimeout(() => setShareStatus(""), 2600);
     }
-  };
-
-  // A light cursor-following tilt for the pinned/index-card surfaces, on top
-  // of their existing hover lift — reinforces the "objects on a desk" feel
-  // instead of flat hover states. Purely presentational: sets CSS custom
-  // properties the stylesheet already knows how to fall back to at 0deg.
-  const handleTilt = (event: ReactPointerEvent<HTMLElement>) => {
-    if (event.pointerType === "touch") return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const px = (event.clientX - bounds.left) / bounds.width - 0.5;
-    const py = (event.clientY - bounds.top) / bounds.height - 0.5;
-    event.currentTarget.style.setProperty("--tilt-x", `${(-py * 8).toFixed(2)}deg`);
-    event.currentTarget.style.setProperty("--tilt-y", `${(px * 8).toFixed(2)}deg`);
-  };
-  const resetTilt = (event: ReactPointerEvent<HTMLElement>) => {
-    event.currentTarget.style.setProperty("--tilt-x", "0deg");
-    event.currentTarget.style.setProperty("--tilt-y", "0deg");
   };
 
   return (
@@ -818,6 +726,7 @@ export default function Home() {
 
           <div className="run-row">
             <div className="pipeline-status"><span className={`status-dot ${pipelineStage === "Complete" ? "complete" : pipelineStage === "Fallback ready" ? "warning" : isAnalysing ? "working" : ""}`} /><p><strong>{pipelineStage}</strong><small>{pipelineNote}</small></p></div>
+            <label className="analysis-profile-control" htmlFor="analysis-profile"><span>Explain relevance for</span><select id="analysis-profile" value={selectedProfile} onChange={(event) => setSelectedProfile(event.target.value as UserProfile)}>{userProfiles.map((profile) => <option key={profile}>{profile}</option>)}</select></label>
             <button className={`analyse-button ${isAnalysing ? "working" : ""}`} onClick={runAnalysis} disabled={isAnalysing || ocrBusy || !headline.trim() || requiresOcrConfirmation}>{isAnalysing ? "Tracing evidence…" : "Analyse"}<span>↗</span></button>
           </div>
           {errorMessage && <div className="alert" role="alert"><strong>Action needed</strong><span>{errorMessage}</span><button onClick={() => setErrorMessage("")}>Dismiss</button></div>}
@@ -835,133 +744,16 @@ export default function Home() {
           <div className="failure-kicker"><span>Analysis pending</span><small>Source language: {detectedInputLanguage}</small></div>
           <h2>{isAnalysing ? "Tracing evidence for this headline…" : "Your custom headline is ready to analyse."}</h2>
           <div className="failure-explanation"><strong>The previous result has been cleared.</strong><p>{isAnalysing ? "MacroLens is checking source eligibility, claim support and contradiction before it renders a result." : "Run analysis to create a new, clearly labelled result for this headline."}</p></div>
-        </article> : retrievalUnavailable ? <article className="retrieval-failure content-panel">
-          <div className="failure-kicker"><span>Retrieval unavailable</span><small>Source language: {result.detectedLanguage}</small></div>
-          <h2 className={result.headline.length > 180 ? "very-long" : result.headline.length > 90 ? "long" : ""}>“{result.headline}”</h2>
-          <div className="failure-explanation"><strong>No evidence-backed analysis was generated.</strong><p>The public source feeds returned zero usable results. MacroLens has not created a causal map, winners, losers or a Stress Test from unsupported commentary.</p></div>
-          <div className="language-status"><span>Source language: <b>{result.detectedLanguage}</b></span><span>Explanation language: <b>{explanationLanguage}</b></span><span>Machine translation: <b>{result.detectedLanguage === explanationLanguage ? "not required" : "not human-verified"}</b></span></div>
-          <div className="failure-actions"><button onClick={() => { setInputMode("text"); document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }); window.setTimeout(() => headlineInputRef.current?.focus(), 350); }}>Edit headline</button><button onClick={runAnalysis}>Retry retrieval</button></div>
-          <div className="failure-demos"><span>Or select a prepared case</span>{demoCases.map((demo, index) => <button key={demo.id} onClick={() => selectDemo(demo)}><b>0{index + 1}</b>{index === 0 ? "RBI decision" : index === 1 ? "Red Sea" : "AI energy"}</button>)}</div>
-          <div className="system-note"><span>System note</span><p>Retrieval failure is a capability boundary, not an economic conclusion.</p></div>
-        </article> : <>
-        <article className="bottom-line content-panel reveal">
-          <div className="bottom-line-top">
-            <small>Source language: {result.detectedLanguage} · {result.updated}</small>
-            <button className="share-button" type="button" onClick={shareResult}>↗ Share{shareStatus && <small>{shareStatus}</small>}</button>
-          </div>
-          <h2 className={result.headline.length > 180 ? "very-long" : result.headline.length > 90 ? "long" : ""}>“{result.headline}”</h2>
-          <div className={`verdict-chip ${verdictCopy(result.confidence.level).tone}`}>{verdictCopy(result.confidence.level).label}</div>
-          <p className="bottom-line-label">The bottom line</p>
-          <p className="bottom-line-text">{translatedFrame || result.shortFrame}</p>
-          <div className="quick-facts">
-            <div><span>✅ What&rsquo;s certain</span><p>{result.confirmed[0] ?? "Nothing has met the confirmation threshold yet."}</p></div>
-            <div><span>❔ What&rsquo;s not</span><p>{result.uncertain[0] ?? "—"}</p></div>
-          </div>
-          <div className="frame-row-lang">
-            <label htmlFor="output-language">{labels[explanationLanguage].output}</label>
-            <select id="output-language" value={explanationLanguage} onChange={(event) => setExplanationLanguage(event.target.value as ExplanationLanguage)}><option>English</option><option>Hindi</option><option>Marathi</option></select>
-            <small>Explanation language: {explanationLanguage} · Machine translation: {result.detectedLanguage === explanationLanguage ? "not required" : "not human-verified"}</small>
-          </div>
-        </article>
-
-        {canRenderCausalSurface ? <>
-        <section className="ordered-section story-section reveal">
-          <div className="section-title"><span>01</span><div><h3>Here&rsquo;s what happened</h3><p>Every step keeps its evidence status — nothing here is a plain true/false verdict.</p></div></div>
-          <div className="story-flow">{storyNodes.map((node, index) => <button type="button" className={`story-card ${selectedNodeId === node.id ? "active" : ""}`} key={node.id} onClick={() => selectNode(node)} onPointerMove={handleTilt} onPointerLeave={resetTilt} aria-pressed={selectedNodeId === node.id}><span className="story-step">0{index + 1}</span><span className="story-q">{storyQuestion[node.layer]}</span><p>{node.summary}</p><span className={`stamp ${kindClass(node.kind)}`}>{node.kind}</span><i aria-hidden="true">↗</i></button>)}</div>
-        </section>
-
-        <section className="ordered-section care-section reveal">
-          <div className="section-title"><span>02</span><div><h3>Why should you care?</h3><p>Potential exposure — not a prediction.</p></div></div>
-          <div className="care-grid">{result.whyItMatters.map((item, index) => <article className="care-card" key={item} onPointerMove={handleTilt} onPointerLeave={resetTilt}><span aria-hidden="true">{careLabels[index % careLabels.length]}</span><p>{item}</p><i aria-hidden="true" /></article>)}</div>
-          <div className="impact-grid">
-            <article className="winner-panel content-panel"><div className="impact-label"><span>Who might gain</span><span className="stamp hypothesis">Potential exposure</span></div>{result.winners.map((item) => <p key={item}>↗ {item}</p>)}</article>
-            <article className="loser-panel content-panel"><div className="impact-label"><span>Who might lose out</span><span className="stamp hypothesis">Potential exposure</span></div>{result.losers.map((item) => <p key={item}>↘ {item}</p>)}</article>
-          </div>
-        </section>
-
-        <section className="ordered-section ripple-section reveal" aria-label="Interactive causal map: The ripple effect">
-          <div className="section-title"><span>03</span><div><h3>🔗 The ripple effect</h3><p>Tap a step to see the reasoning and evidence behind it.</p></div></div>
-          <div className="ripple-flow">{result.nodes.map((node, index) => <div className="ripple-item" key={node.id}><button className={`ripple-node ${selectedNodeId === node.id ? "active" : ""}`} onClick={() => selectNode(node)} aria-pressed={selectedNodeId === node.id}>{node.title}</button>{index < result.nodes.length - 1 && <span className="ripple-arrow" aria-hidden="true">↓</span>}</div>)}</div>
-          {selectedNode && <div className="ripple-drawer" aria-live="polite" key={selectedNode.id}>
-            <div className="ripple-drawer-head"><span>{selectedNode.layer}</span><b className={`confidence-chip ${selectedNode.confidence.toLowerCase()}`}>{selectedNode.confidence} confidence</b></div>
-            <p>{selectedNode.summary}</p>
-            <div className="reasoning-block"><span>Uncertainty</span><p>{selectedNode.uncertainty}</p></div>
-            <div className="linked-evidence"><span>Evidence behind this</span>{linkedSources.length ? linkedSources.map((source) => <button key={source.id} className={selectedSourceId === source.id ? "active" : ""} onClick={() => setSelectedSourceId(source.id)}><b>{source.id}</b><span>{source.publisher}</span><small>{source.evidenceRole}</small></button>) : <div className="empty-evidence">No source directly verifies this node.</div>}</div>
-            {selectedSource && selectedNode.evidenceIds.includes(selectedSource.id) && <a className="source-preview" href={selectedSource.url} target="_blank" rel="noopener noreferrer"><span>{selectedSource.title}</span><small>Open source ↗</small></a>}
-          </div>}
-          <button className="full-map-toggle" type="button" onClick={() => setShowFullMap((value) => !value)} aria-expanded={showFullMap}>{showFullMap ? "Hide the full evidence map" : "See the full evidence map →"}</button>
-          <div className={`collapse ${showFullMap ? "open" : ""}`}><div className="collapse-inner"><div className="map-workspace">
-            <div className="causal-map" aria-label="Signal to mechanism to relevance causal map">
-              <div className="map-axis"><span>Signal</span><span>Mechanism</span><span>Relevance</span></div>
-              <div className="map-track" />
-              <div className="map-arrows" aria-hidden="true"><span>→</span><span>→</span><span>→</span><span>→</span></div>
-              {result.nodes.map((node, index) => <button key={node.id} className={`map-node node-${index + 1} ${selectedNodeId === node.id ? "active" : ""}`} onClick={() => selectNode(node)} onPointerMove={handleTilt} onPointerLeave={resetTilt} aria-pressed={selectedNodeId === node.id}><small>{String(index + 1).padStart(2, "0")} · {node.layer}</small><strong>{node.title}</strong><span className={`stamp ${kindClass(node.kind)}`}>{node.kind}</span></button>)}
-            </div>
-            <aside className="evidence-inspector glass" aria-live="polite">
-              <div className="inspector-head"><span>Evidence inspector</span><b className={`confidence-chip ${selectedNode.confidence.toLowerCase()}`}>{selectedNode.confidence} confidence</b></div>
-              <p className="node-layer">{selectedNode.layer}</p><h4>{selectedNode.title}</h4><p>{selectedNode.summary}</p>
-              <div className="reasoning-block"><span>Uncertainty</span><p>{selectedNode.uncertainty}</p></div>
-              <div className="linked-evidence"><span>Evidence behind this node</span>{linkedSources.length ? linkedSources.map((source) => <button key={source.id} className={selectedSourceId === source.id ? "active" : ""} onClick={() => setSelectedSourceId(source.id)}><b>{source.id}</b><span>{source.publisher}</span><small>{source.evidenceRole}</small></button>) : <div className="empty-evidence">No source directly verifies this node.</div>}</div>
-              {selectedSource && selectedNode.evidenceIds.includes(selectedSource.id) && <a className="source-preview" href={selectedSource.url} target="_blank" rel="noopener noreferrer"><span>{selectedSource.title}</span><small>Open source ↗</small></a>}
-            </aside>
-          </div></div></div>
-        </section>
-
-        <section className="ordered-section change-section content-panel reveal" aria-label="Stress Test: What could change this?">
-          <div className="section-title"><span>04</span><div><h3>🔮 What could change this?</h3><p>{dependencyNode?.summary}</p></div></div>
-          <div className="change-chips">{result.stressTest.changeConditions.map((item) => <span className="chip" key={item}>{item}</span>)}</div>
-          <button className="change-test-toggle" type="button" onClick={() => setChangeTestOpen((value) => !value)} aria-expanded={changeTestOpen}>{changeTestOpen ? "Hide the full stress test" : "Show the full stress test →"}</button>
-          <div className={`collapse ${changeTestOpen ? "open" : ""}`}><div className="collapse-inner">
-            <div className="stress-grid"><article><span>Challenging evidence</span>{result.stressTest.challengingEvidence.map((item) => <p key={item}>{item}</p>)}</article><article><span>Alternative explanations</span>{result.stressTest.alternatives.map((item) => <p key={item}>{item}</p>)}</article><article><span>Missing information</span>{result.stressTest.missingInformation.map((item) => <p key={item}>{item}</p>)}</article><article><span>What changes the conclusion</span>{result.stressTest.changeConditions.map((item) => <p key={item}>{item}</p>)}</article></div>
-            <div className="stress-sources"><span>Counter/context trail</span>{stressSources.length ? stressSources.map((source) => <a key={source.id} href={source.url} target="_blank" rel="noopener noreferrer"><b>{source.id}</b>{source.evidenceRole}</a>) : <small>No article-level counter-evidence retrieved.</small>}</div>
-          </div></div>
-        </section>
-
-        <section className="ordered-section sureness-section content-panel reveal">
-          <div className="section-title"><span aria-hidden="true">🟢</span><div><h3>How sure are we?</h3><p>{sureness(signalNode?.confidence)} about what happened. {sureness((consequenceNode ?? relevanceNode)?.confidence)} about what happens next.</p></div></div>
-          <button className="why-link" type="button" onClick={() => { setDeepDiveOpen(true); window.setTimeout(() => document.getElementById("confidence-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }}>Why? ↓</button>
-        </section>
-
-        <section className="ordered-section sources-preview-section content-panel reveal">
-          <div className="section-title"><span aria-hidden="true">📎</span><div><h3>Sources · {result.sources.length}</h3><p>The claims above are traced to these sources.</p></div></div>
-          {result.sources.length ? <div className="sources-preview">{result.sources.slice(0, 3).map((source) => <a key={source.id} href={source.url} target="_blank" rel="noopener noreferrer" className="source-preview-row"><b>{source.id}</b><span>{source.publisher}</span><span className={`role-pill ${roleClass(source.evidenceRole)}`}>{source.evidenceRole}</span></a>)}</div> : <p className="no-sources">No sources were retrieved for this headline.</p>}
-          <button className="why-link" type="button" onClick={() => { setDeepDiveOpen(true); window.setTimeout(() => document.getElementById("ledger-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }}>View the full evidence ledger →</button>
-        </section>
-        </> : <section className="ordered-section causal-boundary content-panel reveal">
-          <div className="section-title"><span>—</span><div><h3>No evidence-backed economic pathway</h3><p>No generic mechanism, relevance, winners or losers were generated.</p></div></div>
-          <div className="causal-boundary-copy"><strong>The retrieved evidence did not establish a reliable business or economic channel.</strong><p>MacroLens still shows the claim and evidence ledger below, but does not invent an economic story from weak, unrelated or contradictory sources.</p></div>
-        </section>}
-
-        <button className="deep-dive-toggle" type="button" onClick={() => setDeepDiveOpen((value) => !value)} aria-expanded={deepDiveOpen}>{deepDiveOpen ? "Hide the evidence & reasoning" : "🔍 See the evidence & reasoning"}</button>
-
-        <div className={`collapse deep-dive-collapse ${deepDiveOpen ? "open" : ""}`}><div className="collapse-inner">
-        <div className="deep-dive">
-          <section className="ordered-section claims-section reveal">
-            <div className="section-title"><span>05</span><div><h3>Extracted claims</h3><p>Each statement receives its own evidence status.</p></div></div>
-            <div className="claims-grid">{result.claims.map((claim) => <article className="claim-card" key={claim.id} onPointerMove={handleTilt} onPointerLeave={resetTilt}><div><b>{claim.id}</b><span className="claim-category">{claim.category}</span><span className={`stamp ${kindClass(claim.kind)}`}>{claim.kind}</span></div><p>{claim.text}</p><footer>{claim.evidenceIds.length ? <span>Linked: {claim.evidenceIds.join(" · ")}</span> : <span className="missing">No supporting evidence linked</span>}</footer></article>)}</div>
-          </section>
-
-          <section className="ordered-section confirmation-grid">
-            <article className="content-panel"><div className="section-title compact"><span>06</span><div><h3>What is confirmed</h3><p>Only statements supported by the current ledger.</p></div></div>{result.confirmed.length ? <><ul>{result.confirmed.map((item) => <li key={item}>{item}</li>)}</ul><small className="trace-note">Trace to confirmed claims and {confirmedEvidenceIds.join(" · ") || "the evidence ledger"}</small></> : <div className="insufficient-message">No claim met the confirmation threshold. Limited support, if any, remains labelled as an inference in the claim cards and evidence ledger.</div>}</article>
-            <article className="content-panel uncertainty-panel"><div className="section-title compact"><span>06</span><div><h3>What remains uncertain</h3><p>Gaps are part of the answer.</p></div></div><ul>{result.uncertain.map((item) => <li key={item}>{item}</li>)}</ul></article>
-          </section>
-
-          <section className="ordered-section confidence-section content-panel" id="confidence-detail">
-            <div className="section-title"><span>07</span><div><h3>Confidence explanation</h3><p>No unsupported percentage. The category reflects evidence quality and completeness.</p></div></div>
-            <div className="confidence-layout"><div className={`confidence-orb ${result.confidence.level.toLowerCase()}`}><strong>{result.confidence.level}</strong><span>confidence</span></div><ul>{result.confidence.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>
-          </section>
-
-          <section className="ordered-section ledger-section" id="ledger-detail">
-            <div className="section-title"><span>08</span><div><h3>Evidence ledger</h3><p>Every source has a type, claim link, role and concise evidence note.</p></div></div>
-            {result.sources.length ? <div className="ledger-wrap"><table><thead><tr><th>Source</th><th>Publisher / date</th><th>Type</th><th>Claim</th><th>Evidence role</th><th>Relevant evidence</th></tr></thead><tbody>{result.sources.map((source) => <tr key={source.id} id={`evidence-${source.id}`}><td><a href={source.url} target="_blank" rel="noopener noreferrer"><b>{source.id}</b>{source.title}<span>Open ↗</span></a></td><td>{source.publisher}<small>{source.date}</small></td><td>{source.sourceType}</td><td>{source.relatedClaims.length ? source.relatedClaims.join(", ") : "None"}</td><td><span className={`role-pill ${roleClass(source.evidenceRole)}`}>{source.evidenceRole}</span></td><td>{source.note}</td></tr>)}</tbody></table></div> : <div className="ledger-empty content-panel"><strong>No evidence ledger available</strong><p>There is currently insufficient reliable evidence to verify this claim. Retry live retrieval or load a pre-verified demo.</p><button onClick={runAnalysis}>Retry retrieval</button></div>}
-          </section>
-
-          <section className="ordered-section limitations-section content-panel">
-            <div className="section-title"><span>09</span><div><h3>Limitations</h3><p>What this result cannot establish.</p></div></div><ul>{result.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
-          </section>
-        </div>
-        </div></div>
-        </>}
+        </article> : <ResultExperience
+          key={result.id}
+          result={result}
+          explanationLanguage={explanationLanguage}
+          onExplanationLanguageChange={setExplanationLanguage}
+          onShare={shareResult}
+          shareStatus={shareStatus}
+          profile={selectedProfile}
+          onProfileChange={setSelectedProfile}
+        />}
       </section>
 
       <section className="method-shell" id="method">

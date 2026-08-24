@@ -1,4 +1,5 @@
-import type { AnalysisResult, Claim, ClaimCategory, EvidenceRole, EvidenceSource, SourceType } from "../data/demoCases";
+import type { AnalysisResult, Claim, ClaimCategory, CoreAnalysisResult, EvidenceRole, EvidenceSource, SourceType } from "../data/demoCases";
+import { enrichAnalysisResult } from "./resultExperience.ts";
 
 export type DetectedLanguage = "English" | "Hindi" | "Marathi";
 export type RetrievedArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
@@ -274,6 +275,9 @@ export function makeEvidenceSources(claims: Claim[], articles: RetrievedArticle[
       relatedClaims,
       evidenceRole,
       verificationDepth: article.bodyRead ? "full-text" : undefined,
+      excerpt: article.bodyRead ? passage : undefined,
+      translationDisclosure: "Source text is shown in its retrieved language; no human translation is implied.",
+      limitations: article.bodyRead ? [] : ["Only title metadata was retrieved; this source cannot verify a claim."],
       note,
     };
   });
@@ -434,7 +438,12 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
       : supporting.length
       ? "Evidence-supported inference"
       : "Unverified claim";
-    return { ...claim, kind, evidenceIds: sources.filter((source) => source.relatedClaims.includes(claim.id)).map((source) => source.id) };
+    return {
+      ...claim,
+      kind,
+      isHeadlineClaim: true,
+      evidenceIds: sources.filter((source) => source.relatedClaims.includes(claim.id)).map((source) => source.id),
+    };
   });
   const confirmed = assessedClaims.filter((claim) => claim.kind === "Confirmed fact").map((claim) => `${claim.text} This is corroborated by ${claim.evidenceIds.filter((id) => sources.find((source) => source.id === id)?.evidenceRole === "Supports").join(" and ")}.`);
   const factualClaims = assessedClaims.filter((claim) => claim.category !== "Causal hypothesis");
@@ -470,21 +479,32 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
         ? `${unratedRelatedSources.length} matching unrated web source${unratedRelatedSources.length === 1 ? " was" : "s were"} excluded from support and confidence.`
         : hasContext ? "Related or ambiguous sources remain context only." : "No sufficiently related source was found.",
     ];
-  const limitedSupportNote = fullTextSupportingSources.length
-    ? "Verification-eligible source text provides limited support, but the confirmation threshold was not met."
+  const allSubmittedClaimsConfirmed = assessedClaims.length > 0 && assessedClaims.every((claim) => claim.kind === "Confirmed fact");
+  const limitedSupportNote = allSubmittedClaimsConfirmed
+    ? "Every submitted headline claim met the confirmation threshold; wider causes and effects remain separate."
+    : fullTextSupportingSources.length
+    ? "Verification-eligible source text supports part of the headline, but not every submitted claim met the confirmation threshold."
     : warning;
   const primaryClaimKind = assessedClaims[0]?.kind;
+  const primaryClaimId = assessedClaims[0]?.id;
+  const signalEvidenceIds = fullTextSources
+    .filter((source) => primaryClaimId && source.relatedClaims.includes(primaryClaimId) && (source.evidenceRole === "Supports" || source.evidenceRole === "Contradicts"))
+    .map((source) => source.id);
+  const confirmedClaimText = assessedClaims.filter((claim) => claim.kind === "Confirmed fact").map((claim) => claim.text).join(" ");
+  const contradictedClaim = assessedClaims.find((claim) => directContradictionFor(claim).length > 0);
 
-  return {
+  const coreResult: CoreAnalysisResult = {
     id: `live-${Date.now()}`,
     mode: "live",
     headline,
     detectedLanguage: language,
     updated: `${sources.length ? "Live analysis" : "Live retrieval unavailable"} · ${new Date().toISOString().slice(0, 10)}`,
     shortFrame: hasConflict
-      ? `${fullTextContradictingSources.length} verification-eligible source${fullTextContradictingSources.length === 1 ? " contradicts" : "s contradict"} at least one decomposed claim. The claim remains unverified.`
+      ? `Eligible source text conflicts with this statement: ${contradictedClaim?.text || headline} The claim remains unresolved.`
+      : allSubmittedClaimsConfirmed
+      ? `${confirmedClaimText} Wider causes and personal effects remain separate unless independently supported.`
       : fullTextSources.length
-      ? `${fullTextSources.length} public article page${fullTextSources.length === 1 ? " was" : "s were"} read and matched against decomposed claims. Claims without direct textual corroboration remain unverified.`
+      ? "Eligible source text supports part of the headline, but the complete claim remains unverified."
       : hasContext
       ? `${sources.length} recent public source${sources.length === 1 ? " was" : "s were"} retrieved and linked at claim level. Their titles add context; article-body verification remains incomplete.`
       : warning,
@@ -496,7 +516,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
       "Explicit contradiction cues are detected, but subtle framing, satire and complex semantics still require human review.",
     ],
     nodes: [
-      { id: "signal", layer: "Signal", title: hasConflict ? "Claim challenged by source text" : confirmed.length ? "Claim corroborated by source text" : primaryClaimKind === "Evidence-supported inference" ? "Claim has limited source support" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: primaryClaimKind || "Unverified claim", confidence: confidenceLevel, evidenceIds: contextualIds, uncertainty: hasConflict ? "The retrieved evidence contains a direct contradiction, so this claim is not confirmed." : confirmed.length ? "Corroboration is limited to verification-eligible fetched text and does not prove every implication." : limitedSupportNote },
+      { id: "signal", layer: "Signal", title: hasConflict ? "Claim challenged by source text" : confirmed.length ? "Claim corroborated by source text" : primaryClaimKind === "Evidence-supported inference" ? "Claim has limited source support" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: primaryClaimKind || "Unverified claim", confidence: confidenceLevel, evidenceIds: signalEvidenceIds, uncertainty: hasConflict ? "The retrieved evidence contains a direct contradiction, so this claim is not confirmed." : allSubmittedClaimsConfirmed ? "The submitted claim is corroborated; that does not prove every wider implication." : limitedSupportNote },
       { id: "mechanism", layer: "Mechanism", title: causalFrame.mechanismTitle, summary: causalFrame.mechanismSummary, kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No verification-eligible source directly establishes this transmission channel." },
       { id: "dependency", layer: "Hidden dependency", title: causalFrame.dependencyTitle, summary: causalFrame.dependencySummary, kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "The necessary exposure and timing conditions have not been established." },
       { id: "consequence", layer: "Wider consequence", title: causalFrame.consequenceTitle, summary: causalFrame.consequenceSummary, kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "Magnitude, direction and affected groups remain open." },
@@ -520,6 +540,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
       ? ["Only verification-eligible public source text can affect claim status; unrated sites and metadata-only results remain context.", "The conservative rules detect explicit negation, refutation, hedging and directional conflict, but they are not a universal semantic truth engine.", "Open the linked sources and review their full context before relying on a result."]
       : ["Retrieval was unavailable; no live metadata or evidence-backed causal analysis was produced.", "No curated evidence was substituted for the failed custom request.", "Use Retry or select a clearly labelled pre-verified demonstration."],
   };
+  return enrichAnalysisResult(coreResult);
 }
 
 export function searchQueryFor(headline: string) {

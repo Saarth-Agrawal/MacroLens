@@ -1,3 +1,5 @@
+import { enrichAnalysisResult } from "../lib/resultExperience.ts";
+
 export type ConfidenceLevel = "High" | "Medium" | "Low";
 export type StatementKind = "Confirmed fact" | "Evidence-supported inference" | "Causal hypothesis" | "Unverified claim";
 export type ClaimCategory = "Event" | "Cause" | "Consequence" | "Causal hypothesis";
@@ -15,6 +17,9 @@ export type EvidenceSource = {
   relatedClaims: string[];
   evidenceRole: EvidenceRole;
   verificationDepth?: "full-text" | "headline-consensus";
+  excerpt?: string;
+  translationDisclosure?: string;
+  limitations?: string[];
   note: string;
 };
 
@@ -24,6 +29,8 @@ export type Claim = {
   category: ClaimCategory;
   kind: StatementKind;
   evidenceIds: string[];
+  /** True only when this statement is part of the submitted headline itself. */
+  isHeadlineClaim?: boolean;
 };
 
 export type CausalNode = {
@@ -37,7 +44,7 @@ export type CausalNode = {
   uncertainty: string;
 };
 
-export type AnalysisResult = {
+export type CoreAnalysisResult = {
   id: string;
   mode: "curated" | "live";
   headline: string;
@@ -63,7 +70,78 @@ export type AnalysisResult = {
   limitations: string[];
 };
 
-export const demoCases: AnalysisResult[] = [
+export type EvidenceStatus = "Confirmed" | "Contested" | "Insufficient";
+export type UserProfile = "General reader" | "Student" | "Salaried household" | "Small-business owner" | "Senior citizen";
+export type ExposureType = "Direct" | "Indirect" | "No established exposure";
+export type CouncilRole = "Verifier" | "Challenger" | "Mechanism Analyst" | "Relevance Analyst" | "Auditor";
+
+export type BottomLine = {
+  explanation: string;
+  evidenceStatus: EvidenceStatus;
+  keyImplication: string;
+  keyUncertainty: string;
+  independentSourceCount: number;
+  lastUpdated: string;
+  evidenceIds: string[];
+  auditorApproved: boolean;
+};
+
+export type VisualStory = {
+  whatHappened: { text: string; status: StatementKind; evidenceIds: string[] };
+  why: { text: string; supportType: StatementKind; conditions: string; evidenceIds: string[] };
+  whatNext: { text: string; timeHorizon: string; indicators: string[]; uncertainty: string; evidenceIds: string[] };
+  whyYouCare: { text: string; userProfile: UserProfile; exposureType: ExposureType; conditions: string; timeHorizon: string; evidenceIds: string[] };
+};
+
+export type CouncilPerspective = {
+  role: CouncilRole;
+  purpose: string;
+  position: string;
+  reasoning: string;
+  evidenceIds: string[];
+  claimIds: string[];
+  uncertainty: string;
+  challenges: string;
+  questionForUser: string;
+  confidenceCategory: ConfidenceLevel;
+};
+
+export type CouncilDisagreement = {
+  roles: [CouncilRole, CouncilRole];
+  subject: string;
+  evidenceByRole: Partial<Record<CouncilRole, string[]>>;
+  concern: "Fact" | "Causation" | "Relevance" | "Time horizon";
+};
+
+export type CouncilSynthesis = {
+  areasOfAgreement: string[];
+  areasOfDisagreement: CouncilDisagreement[];
+  unresolvedQuestions: string[];
+  evidenceNeeded: string[];
+};
+
+export type ProfileRelevance = {
+  profile: UserProfile;
+  text: string;
+  exposureType: ExposureType;
+  conditions: string;
+  timeHorizon: string;
+  evidenceIds: string[];
+};
+
+export type ResultLayers = {
+  selectedProfile: UserProfile;
+  profileRelevance: Record<UserProfile, ProfileRelevance>;
+  bottomLine: BottomLine;
+  visualStory: VisualStory;
+  councilPerspectives: CouncilPerspective[];
+  councilSynthesis: CouncilSynthesis;
+  reflectionPrompts: string[];
+};
+
+export type AnalysisResult = CoreAnalysisResult & ResultLayers;
+
+const coreDemoCases: CoreAnalysisResult[] = [
   {
     id: "rbi-august-2026",
     mode: "curated",
@@ -76,10 +154,10 @@ export const demoCases: AnalysisResult[] = [
       Marathi: "आरबीआयने रेपो दर ५.२५% वर कायम ठेवली आणि तटस्थ भूमिका राखली. याचा अर्थ ईएमआय लगेच बदलेल असा नाही; पुढील दिशा महागाई आणि बँकांच्या व्याजदर हस्तांतरणावर अवलंबून आहे.",
     },
     claims: [
-      { id: "C1", text: "The Reserve Bank of India held the policy repo rate at 5.25%.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2"] },
-      { id: "C2", text: "The Monetary Policy Committee retained a neutral stance.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2"] },
-      { id: "C3", text: "The pause reflects a wait for clearer evidence about the inflation path.", category: "Cause", kind: "Evidence-supported inference", evidenceIds: ["S2", "S3"] },
-      { id: "C4", text: "The decision will keep every borrower’s EMI unchanged.", category: "Consequence", kind: "Unverified claim", evidenceIds: [] },
+      { id: "C1", text: "The Reserve Bank of India held the policy repo rate at 5.25%.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2"], isHeadlineClaim: true },
+      { id: "C2", text: "The Monetary Policy Committee retained a neutral stance.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2"], isHeadlineClaim: true },
+      { id: "C3", text: "The pause reflects a wait for clearer evidence about the inflation path.", category: "Cause", kind: "Evidence-supported inference", evidenceIds: ["S2", "S3"], isHeadlineClaim: false },
+      { id: "C4", text: "The decision will keep every borrower’s EMI unchanged.", category: "Consequence", kind: "Unverified claim", evidenceIds: [], isHeadlineClaim: false },
     ],
     confirmed: [
       "The policy repo rate remained 5.25% after the August 2026 meeting.",
@@ -109,7 +187,7 @@ export const demoCases: AnalysisResult[] = [
         summary: "Holding the benchmark avoids a new rate cut or increase, but banks still transmit earlier decisions on their own schedules.",
         kind: "Evidence-supported inference",
         confidence: "Medium",
-        evidenceIds: ["S1", "S4"],
+        evidenceIds: ["S1"],
         uncertainty: "Loan reset dates, funding costs and bank pricing can produce different outcomes for different borrowers.",
       },
       {
@@ -129,7 +207,7 @@ export const demoCases: AnalysisResult[] = [
         summary: "Some floating-rate loans may respond to earlier transmission while fixed-rate contracts and bank-specific pricing do not.",
         kind: "Causal hypothesis",
         confidence: "Medium",
-        evidenceIds: ["S4"],
+        evidenceIds: [],
         uncertainty: "The headline cannot establish the size or timing of household-level effects.",
       },
       {
@@ -139,7 +217,7 @@ export const demoCases: AnalysisResult[] = [
         summary: "Students, households and small firms should watch loan resets, deposit rates, food inflation and oil—not assume an instant EMI change.",
         kind: "Evidence-supported inference",
         confidence: "Medium",
-        evidenceIds: ["S1", "S3", "S4"],
+        evidenceIds: ["S1", "S3"],
         uncertainty: "Personal impact depends on the type of loan, bank and household exposure.",
       },
     ],
@@ -220,10 +298,10 @@ export const demoCases: AnalysisResult[] = [
       Marathi: "लाल समुद्रातील हल्ल्यांनंतर जहाजांचे मार्ग बदलले आणि अंतर व वाहतूक खर्च वाढला. मात्र वाढलेला मालवाहतूक खर्च प्रत्येक वस्तूच्या किमतीत समान प्रमाणात जात नाही.",
     },
     claims: [
-      { id: "C1", text: "Attacks in the Red Sea disrupted commercial shipping.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2", "S3"] },
-      { id: "C2", text: "Carriers rerouted vessels away from the Suez route.", category: "Consequence", kind: "Confirmed fact", evidenceIds: ["S1", "S2"] },
-      { id: "C3", text: "Longer routes increased capacity pressure and trade costs.", category: "Consequence", kind: "Evidence-supported inference", evidenceIds: ["S1", "S3", "S4"] },
-      { id: "C4", text: "The disruption caused broad consumer-price inflation everywhere.", category: "Causal hypothesis", kind: "Unverified claim", evidenceIds: [] },
+      { id: "C1", text: "Attacks in the Red Sea disrupted commercial shipping.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2", "S3"], isHeadlineClaim: true },
+      { id: "C2", text: "Carriers rerouted vessels away from the Suez route.", category: "Consequence", kind: "Confirmed fact", evidenceIds: ["S1", "S2"], isHeadlineClaim: true },
+      { id: "C3", text: "Longer routes increased capacity pressure and trade costs.", category: "Consequence", kind: "Confirmed fact", evidenceIds: ["S1", "S3", "S4"], isHeadlineClaim: true },
+      { id: "C4", text: "The disruption caused broad consumer-price inflation everywhere.", category: "Causal hypothesis", kind: "Unverified claim", evidenceIds: [], isHeadlineClaim: false },
     ],
     confirmed: ["Suez Canal trade fell sharply in early 2024 as vessels used alternative routes.", "Rerouting increased journey distance and delivery time.", "International institutions recorded higher shipping pressure and supply-chain disruption."],
     uncertain: ["How much freight cost was absorbed by firms rather than consumers.", "How persistent the disruption and rate increases would be.", "The size of India-specific price pass-through by sector."],
@@ -264,10 +342,10 @@ export const demoCases: AnalysisResult[] = [
       Marathi: "डेटा सेंटरची वीज मागणी २०३० पर्यंत जवळपास दुप्पट होण्याचा अंदाज आहे; हा भविष्यकालीन अंदाज आहे, निश्चित तथ्य नाही. कार्यक्षमता, ग्रिडमधील विलंब आणि एआयचा स्वीकार यामुळे परिणाम बदलू शकतो.",
     },
     claims: [
-      { id: "C1", text: "The IEA projects global data-centre electricity demand to roughly double by 2030.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2"] },
-      { id: "C2", text: "AI is an important driver of the projected increase.", category: "Cause", kind: "Evidence-supported inference", evidenceIds: ["S1", "S2"] },
-      { id: "C3", text: "The projected demand will definitely occur.", category: "Consequence", kind: "Unverified claim", evidenceIds: [] },
-      { id: "C4", text: "Higher AI use necessarily creates the same grid pressure in every region.", category: "Causal hypothesis", kind: "Unverified claim", evidenceIds: [] },
+      { id: "C1", text: "The IEA projects global data-centre electricity demand to roughly double by 2030.", category: "Event", kind: "Confirmed fact", evidenceIds: ["S1", "S2"], isHeadlineClaim: true },
+      { id: "C2", text: "AI is an important driver of the projected increase.", category: "Cause", kind: "Confirmed fact", evidenceIds: ["S1", "S2"], isHeadlineClaim: true },
+      { id: "C3", text: "The projected demand will definitely occur.", category: "Consequence", kind: "Unverified claim", evidenceIds: [], isHeadlineClaim: false },
+      { id: "C4", text: "Higher AI use necessarily creates the same grid pressure in every region.", category: "Causal hypothesis", kind: "Unverified claim", evidenceIds: [], isHeadlineClaim: false },
     ],
     confirmed: ["The IEA published a base-case projection near 945 TWh by 2030.", "The projection is roughly double the cited 2024 level.", "The IEA identifies AI as the most important growth driver alongside other digital services."],
     uncertain: ["The pace of AI adoption and inference demand.", "How quickly energy efficiency improves per task.", "Where grid connection bottlenecks delay or relocate projects."],
@@ -292,11 +370,15 @@ export const demoCases: AnalysisResult[] = [
       { id: "S1", title: "Energy demand from AI", publisher: "International Energy Agency", date: "2025-04-10", url: "https://www.iea.org/reports/energy-and-ai/energy-demand-from-ai", sourceType: "Official / primary", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", note: "IEA base case projects about 945 TWh of data-centre electricity demand in 2030, just under 3% of global electricity use." },
       { id: "S2", title: "Energy and AI: Executive summary", publisher: "International Energy Agency", date: "2025-04-10", url: "https://www.iea.org/reports/energy-and-ai/executive-summary", sourceType: "Data / analysis", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", note: "Summarises the projection and identifies AI as the most important growth driver." },
       { id: "S3", title: "Data centre electricity use surged in 2025, even with tightening bottlenecks", publisher: "International Energy Agency", date: "2026-04-16", url: "https://www.iea.org/news/data-centre-electricity-use-surged-in-2025-even-with-tightening-bottlenecks-driving-a-scramble-for-solutions", sourceType: "Official / primary", relatedClaims: ["C2", "C3"], evidenceRole: "Adds context", note: "Updates the outlook and notes rapid efficiency improvement alongside rising AI use and bottlenecks." },
-      { id: "S4", title: "Global trade war may produce headwinds for nascent AI sector, IEA says", publisher: "Reuters", date: "2025-04-10", url: "https://www.reuters.com/technology/artificial-intelligence/global-trade-war-may-produce-headwinds-nascent-ai-sector-iea-says-2025-04-10/", sourceType: "Independent reporting", relatedClaims: ["C3", "C4"], evidenceRole: "Contradicts", note: "Reports the IEA’s lower headwind scenario and project delays, challenging any claim that the base-case outcome is certain." },
+      { id: "S4", title: "Global trade war may produce headwinds for nascent AI sector, IEA says", publisher: "Reuters", date: "2025-04-10", url: "https://www.reuters.com/technology/artificial-intelligence/global-trade-war-may-produce-headwinds-nascent-ai-sector-iea-says-2025-04-10/", sourceType: "Independent reporting", relatedClaims: ["C3", "C4"], evidenceRole: "Adds context", note: "Reports the IEA’s lower headwind scenario and project delays, challenging any claim that the base-case outcome is certain." },
     ],
     limitations: ["This case explains a published projection; it does not certify a future outcome.", "The global evidence does not prove uniform local grid effects.", "India relevance is a transparent hypothesis pending India-specific project and energy data."],
   },
 ];
+
+export const demoCases: AnalysisResult[] = coreDemoCases.map((result) => enrichAnalysisResult(result));
+
+export { auditResultLayers, withUserProfile } from "../lib/resultExperience.ts";
 
 export function findDemoCase(headline: string) {
   const normalised = headline.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();

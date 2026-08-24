@@ -157,7 +157,8 @@ test("uses read public-source text to corroborate a checkable claim", () => {
   assert.equal(result.confidence.level, "High");
   assert.match(result.confidence.reasons[1], /2 verification-eligible source organisations/i);
   assert.equal(result.sources.filter((source) => source.evidenceRole === "Supports").length, 2);
-  assert.match(result.shortFrame, /article page/i);
+  assert.match(result.shortFrame, /debt|\$40 trillion/i);
+  assert.doesNotMatch(result.shortFrame, /article page|metadata-only|retrieval/i);
 });
 
 test("keeps matching headline metadata as context rather than support", () => {

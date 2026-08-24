@@ -19,7 +19,7 @@ const context = {
   passThroughOnException() {},
 };
 
-test("renders the complete competition result surface", async () => {
+test("renders the Level 1 result first and keeps investigation layers collapsed", async () => {
   const worker = await loadWorker();
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), env, context);
   assert.equal(response.status, 200);
@@ -28,15 +28,27 @@ test("renders the complete competition result surface", async () => {
   assert.doesNotMatch(html, developmentPreviewMeta);
   assert.match(html, /Evidence-Linked Causal Intelligence/i);
   assert.match(html, /Curated demo · pre-verified/i);
-  assert.match(html, /Extracted claims/i);
-  assert.match(html, /Interactive causal map/i);
-  assert.match(html, /Stress Test/i);
-  assert.match(html, /Evidence ledger/i);
-  assert.match(html, /Limitations/i);
+  assert.match(html, /The Bottom Line/i);
+  assert.match(html, /Auditor-checked summary/i);
+  assert.match(html, /Confirmed/i);
+  assert.match(html, /independent usable source organisations/i);
+  assert.match(html, /From evidence to relevance/i);
+  assert.match(html, /What happened/i);
+  assert.match(html, /What next/i);
+  assert.match(html, /Why you care/i);
+  assert.match(html, /Key uncertainty/i);
+  assert.match(html, /Dive deeper/i);
+  assert.match(html, /View sources/i);
+  assert.match(html, /General reader/i);
+  assert.match(html, /Small-business owner/i);
+  assert.doesNotMatch(html, /Evidence Council/i);
+  assert.doesNotMatch(html, /Council synthesis/i);
+  assert.doesNotMatch(html, /Form Your View/i);
+  assert.doesNotMatch(html, /Extracted claims/i);
+  assert.doesNotMatch(html, /Evidence ledger/i);
   assert.match(html, /METADATA ONLY RETRIEVED/i);
   assert.match(html, /Character confidence and headline-selection confidence remain separate/i);
   assert.doesNotMatch(html, /Original English analysis/i);
-  assert.match(html, /rbi\.org\.in\/Scripts\/BS_PressReleaseDisplay\.aspx\?prid=63287/i);
   assert.doesNotMatch(html, /\d{1,3}% evidence confidence/i);
 });
 
