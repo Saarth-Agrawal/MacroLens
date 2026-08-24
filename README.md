@@ -14,7 +14,7 @@ The competition flow turns a typed, pasted or scanned headline into checkable cl
 - Tavily public-source search and clean-text retrieval when `TAVILY_API_KEY` is configured, with GDELT DOC 2.0 and Google News RSS fallbacks
 - No database, accounts or image uploads to the server
 - Three fixed pre-verified competition cases in `app/data/demoCases.ts`
-- Conservative live evidence mode for arbitrary headlines
+- Conservative live evidence mode that applies a business and economics lens to any headline
 
 ## Reliability contract
 

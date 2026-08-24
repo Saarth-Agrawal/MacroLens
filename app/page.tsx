@@ -4,6 +4,7 @@ import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, use
 import { demoCases, findDemoCase, type AnalysisResult, type CausalNode, type EvidenceSource, type StatementKind } from "./data/demoCases";
 import { buildLiveAnalysis, detectLanguage, type RetrievedArticle } from "./lib/analysis";
 import { cropCanvas, prepareDocumentImage } from "./lib/documentImage";
+import { buildEconomicLensQuery } from "./lib/economicLens";
 import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlternative, cleanOcrText, mergeLayoutAndDetail, validateHeadline, type CropRegion, type HeadlineCandidate, type OcrLineBox } from "./lib/headlineOcr";
 
 type ExplanationLanguage = "English" | "Hindi" | "Marathi";
@@ -14,8 +15,8 @@ type CropDrag = { mode: "new" | "move" | "resize"; startX: number; startY: numbe
 const stageOrder: PipelineStage[] = ["Decomposing claims", "Retrieving evidence", "Linking evidence", "Complete"];
 const fullPageCrop: CropRegion = { left: 0, top: 0, width: 100, height: 100 };
 
-function normaliseHeadline(value: string) {
-  return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+function analysisInputKey(value: string) {
+  return value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
 }
 
 const labels: Record<ExplanationLanguage, { output: string }> = {
@@ -48,9 +49,12 @@ function ScanPreview({ src }: { src: string }) {
   return <img className="scan-preview" src={src} alt="Newspaper scan preview" />;
 }
 
-async function retrieveDirectFromGdelt(query: string): Promise<RetrievedArticle[]> {
+async function retrieveDirectFromGdelt(query: string, externalSignal?: AbortSignal): Promise<RetrievedArticle[]> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 6500);
+  const abortFromExternal = () => controller.abort();
+  if (externalSignal?.aborted) controller.abort();
+  externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
   try {
     const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=8&format=json&sort=datedesc&timespan=1month`;
     const response = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
@@ -67,6 +71,7 @@ async function retrieveDirectFromGdelt(query: string): Promise<RetrievedArticle[
     });
   } finally {
     window.clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", abortFromExternal);
   }
 }
 
@@ -79,9 +84,10 @@ export default function Home() {
   const [selectedNodeId, setSelectedNodeId] = useState("signal");
   const [selectedSourceId, setSelectedSourceId] = useState("S1");
   const [pipelineStage, setPipelineStage] = useState<PipelineStage>("Ready");
-  const [pipelineNote, setPipelineNote] = useState("Three pre-verified demo cases are ready. Custom headlines use a conservative live evidence search.");
+  const [pipelineNote, setPipelineNote] = useState("Three pre-verified demos are ready. Any custom headline can be examined through the business and economics lens.");
   const [isAnalysing, setIsAnalysing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [resultIsFresh, setResultIsFresh] = useState(true);
   const [imageName, setImageName] = useState("");
   const [imagePreview, setImagePreview] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -112,6 +118,8 @@ export default function Home() {
   const cropDragRef = useRef<CropDrag | null>(null);
   const previewUrlRef = useRef("");
   const lastDirectRetrievalRef = useRef(0);
+  const analysisRunRef = useRef(0);
+  const activeRetrievalControllerRef = useRef<AbortController | null>(null);
 
   const selectedNode = useMemo(() => result.nodes.find((node) => node.id === selectedNodeId) ?? result.nodes[0], [result, selectedNodeId]);
   const selectedSource = useMemo(() => result.sources.find((source) => source.id === selectedSourceId) ?? result.sources[0], [result, selectedSourceId]);
@@ -122,16 +130,50 @@ export default function Home() {
   const detectedInputLanguage = useMemo(() => detectLanguage(headline), [headline]);
   const translatedFrame = explanationLanguage === "English" ? result.shortFrame : result.translatedFrame?.[explanationLanguage];
   const requiresOcrConfirmation = Boolean(imageName) && (!ocrConfirmed || !headlinePlausible);
-  const retrievalUnavailable = result.mode === "live" && result.sources.length === 0;
+  const hasCurrentResult = resultIsFresh && analysisInputKey(headline) === analysisInputKey(result.headline);
+  const retrievalUnavailable = hasCurrentResult && result.mode === "live" && result.sources.length === 0;
   const readSourceCount = result.sources.filter((source) => source.verificationDepth === "full-text").length;
-  const resultStateLabel = result.mode === "curated" ? "CURATED DEMO · PRE-VERIFIED" : readSourceCount ? "PUBLIC SOURCE TEXT READ" : result.sources.length ? "METADATA ONLY RETRIEVED" : "LIVE RETRIEVAL UNAVAILABLE";
-  const hasCurrentResult = normaliseHeadline(headline) === normaliseHeadline(result.headline);
+  const resultStateLabel = !hasCurrentResult
+    ? isAnalysing ? "ANALYSIS IN PROGRESS" : "ANALYSIS PENDING"
+    : result.mode === "curated"
+    ? "CURATED DEMO · PRE-VERIFIED"
+    : readSourceCount
+    ? "PUBLIC SOURCE TEXT READ"
+    : result.sources.length
+    ? "METADATA ONLY RETRIEVED"
+    : "LIVE RETRIEVAL UNAVAILABLE";
+  const resultStateClass = !hasCurrentResult
+    ? "pending"
+    : retrievalUnavailable
+    ? "unavailable"
+    : result.mode === "live"
+    ? "metadata"
+    : "";
+  const hasEvidenceConflict = result.sources.some((source) => source.evidenceRole === "Contradicts");
+  const hasSupportedSignal = result.claims.some((claim) => claim.kind === "Confirmed fact" || claim.kind === "Evidence-supported inference");
+  const canRenderCausalSurface = result.mode === "curated" || (!hasEvidenceConflict && hasSupportedSignal);
 
   useEffect(() => () => {
+    analysisRunRef.current += 1;
+    activeRetrievalControllerRef.current?.abort();
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
   }, []);
 
+  const cancelPendingAnalysis = () => {
+    analysisRunRef.current += 1;
+    activeRetrievalControllerRef.current?.abort();
+    activeRetrievalControllerRef.current = null;
+    setIsAnalysing(false);
+    return analysisRunRef.current;
+  };
+
+  const invalidateCurrentResult = () => {
+    cancelPendingAnalysis();
+    setResultIsFresh(false);
+  };
+
   const resetInput = () => {
+    invalidateCurrentResult();
     setHeadline("");
     setImageName("");
     setImagePreview("");
@@ -149,6 +191,8 @@ export default function Home() {
     setOcrProgress(0);
     setOcrStatus("Choose a clear newspaper image. Processing stays in this browser.");
     setErrorMessage("");
+    setPipelineStage("Ready");
+    setPipelineNote("Enter any headline. MacroLens will examine its business and economic implications.");
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
     previewUrlRef.current = "";
     preparedCanvasRef.current = null;
@@ -157,8 +201,10 @@ export default function Home() {
   };
 
   const selectDemo = (demo: AnalysisResult) => {
+    cancelPendingAnalysis();
     setHeadline(demo.headline);
     setResult(demo);
+    setResultIsFresh(true);
     setSelectedNodeId(demo.nodes[0].id);
     setSelectedSourceId(demo.sources[0]?.id || "");
     setPipelineStage("Complete");
@@ -177,9 +223,9 @@ export default function Home() {
     setMobileNavOpen(false);
   };
 
-  const retrieveArticles = async (query: string) => {
-    const controller = new AbortController();
+  const retrieveArticles = async (query: string, controller: AbortController) => {
     const timer = window.setTimeout(() => controller.abort(), 11000);
+    activeRetrievalControllerRef.current = controller;
     try {
       const response = await fetch("/api/news", {
         method: "POST",
@@ -193,9 +239,10 @@ export default function Home() {
 
       const cooldown = Math.max(0, 5500 - (Date.now() - lastDirectRetrievalRef.current));
       if (cooldown) await sleep(cooldown);
+      if (controller.signal.aborted) throw new DOMException("Analysis cancelled", "AbortError");
       lastDirectRetrievalRef.current = Date.now();
       try {
-        const directArticles = await retrieveDirectFromGdelt(query);
+        const directArticles = await retrieveDirectFromGdelt(buildEconomicLensQuery(query), controller.signal);
         if (directArticles.length) return { articles: directArticles, provider: "GDELT DOC 2.0 · direct browser fallback", limitation: undefined };
       } catch { /* preserve the server's explicit unavailable state */ }
 
@@ -203,6 +250,7 @@ export default function Home() {
       return { articles: [], provider: payload.provider || "offline", limitation: `${payload.limitation || "LIVE RETRIEVAL UNAVAILABLE. No curated evidence has been substituted."} Feed status: ${diagnosticText}.` };
     } finally {
       window.clearTimeout(timer);
+      if (activeRetrievalControllerRef.current === controller) activeRetrievalControllerRef.current = null;
     }
   };
 
@@ -222,18 +270,24 @@ export default function Home() {
       return;
     }
 
+    const demo = findDemoCase(cleanHeadline);
+
+    const runId = cancelPendingAnalysis();
     setIsAnalysing(true);
+    setResultIsFresh(false);
     setErrorMessage("");
     setPipelineStage("Decomposing claims");
     setPipelineNote("Separating the headline into individually checkable claims…");
 
-    const demo = findDemoCase(cleanHeadline);
     if (demo) {
       await sleep(420);
+      if (analysisRunRef.current !== runId) return;
       setPipelineStage("Linking evidence");
       setPipelineNote("Loading the fixed, dated source ledger for this curated case…");
       await sleep(420);
+      if (analysisRunRef.current !== runId) return;
       setResult(demo);
+      setResultIsFresh(true);
       setSelectedNodeId(demo.nodes[0].id);
       setSelectedSourceId(demo.sources[0].id);
       setPipelineStage("Complete");
@@ -245,12 +299,15 @@ export default function Home() {
 
     try {
       setPipelineStage("Retrieving evidence");
-      setPipelineNote("Searching and reading public source text with Tavily, then using conservative public-feed fallbacks if needed.");
-      const retrieval = await retrieveArticles(cleanHeadline);
+      setPipelineNote("Searching public source text for the headline and its business and economic implications…");
+      const retrievalController = new AbortController();
+      const retrieval = await retrieveArticles(cleanHeadline, retrievalController);
+      if (analysisRunRef.current !== runId) return;
       setPipelineStage("Linking evidence");
       setPipelineNote("Checking source eligibility, support, contradiction and evidence gaps…");
       const liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
       setResult(liveResult);
+      setResultIsFresh(true);
       setSelectedNodeId(liveResult.nodes[0].id);
       setSelectedSourceId(liveResult.sources[0]?.id || "");
       setPipelineStage(retrieval.articles.length ? "Complete" : "Fallback ready");
@@ -258,13 +315,16 @@ export default function Home() {
         ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}. Unrated sites and metadata-only results do not affect confidence.`
         : retrieval.limitation || "No close public evidence was retrieved. The insufficient-evidence safeguard is active.");
     } catch {
+      if (analysisRunRef.current !== runId) return;
       const fallback = buildLiveAnalysis(cleanHeadline, []);
       setResult(fallback);
+      setResultIsFresh(true);
       setSelectedNodeId(fallback.nodes[0].id);
       setSelectedSourceId("");
       setPipelineStage("Fallback ready");
       setPipelineNote("Live retrieval failed. No blank screen and no invented answer: use Retry or one of the curated demos.");
     } finally {
+      if (analysisRunRef.current !== runId) return;
       setIsAnalysing(false);
       window.setTimeout(() => document.getElementById("analysis-result")?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
     }
@@ -358,6 +418,7 @@ export default function Home() {
         validation.reasons.push("covers several distant text regions");
         validation.warning = bodyTextWarning;
       }
+      invalidateCurrentResult();
       setHeadline(extracted);
       setOcrCharacterConfidence(characterConfidence);
       setOcrProgress(100);
@@ -377,6 +438,7 @@ export default function Home() {
   };
 
   const detectAndReadHeadline = async (prepared: HTMLCanvasElement) => {
+    invalidateCurrentResult();
     setErrorMessage("");
     setHeadline("");
     setHeadlineCandidates([]);
@@ -445,6 +507,7 @@ export default function Home() {
       return;
     }
 
+    invalidateCurrentResult();
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
     setImageFile(file);
     setImageName(file.name || "Camera scan");
@@ -552,8 +615,8 @@ export default function Home() {
       <section className="intro-shell">
         <div className="intro-copy">
           <p className="eyebrow">SIGNAL <span>→</span> MECHANISM <span>→</span> RELEVANCE</p>
-          <h1>Understand the system <em>behind any headline.</em></h1>
-          <p>MacroLens separates claims, connects evidence to causal pathways and shows what remains uncertain—without pretending every related article proves the story.</p>
+          <h1>Understand the economic system <em>behind any headline.</em></h1>
+          <p>MacroLens accepts any headline, separates its checkable claims and examines only evidence-linked business and economic pathways—without pretending every related article proves the story.</p>
           <div className="hero-actions">
             <button className="live-lens-button" onClick={() => { resetInput(); setInputMode("lens"); window.setTimeout(() => document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }), 20); }}>Try the Live Lens <span>↗</span></button>
             <div className="hero-demos"><span>Or run a prepared case</span>{demoCases.map((demo, index) => <button key={demo.id} onClick={() => { selectDemo(demo); window.setTimeout(() => document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }), 20); }}>0{index + 1}</button>)}</div>
@@ -569,7 +632,7 @@ export default function Home() {
       <section className="workspace-shell" id="workspace">
         <div className="workspace-heading">
           <div><span className="section-index">01 / THE LENS</span><h2>Point. Scan. See the system.</h2></div>
-          <p>Designed for a reliable 45-second demonstration. The curated cases are fixed; custom searches are clearly labelled.</p>
+          <p>Designed for a reliable 45-second demonstration. Curated cases are fixed; every custom headline is examined through a business and economics lens.</p>
         </div>
 
         <div className="input-dock glass">
@@ -580,21 +643,22 @@ export default function Home() {
 
           <div className={`input-layout ${inputMode === "lens" ? "lens-active" : ""}`}>
             <div className="headline-field">
-              <div className="field-label"><label htmlFor="headline">Headline or claim</label><span>Source language: {detectedInputLanguage}</span></div>
+              <div className="field-label"><label htmlFor="headline">Any headline or claim</label><span>Source language: {detectedInputLanguage}</span></div>
               <textarea ref={headlineInputRef} id="headline" rows={4} value={headline} onChange={(event) => {
                 const value = event.target.value.slice(0, 500);
+                invalidateCurrentResult();
                 setHeadline(value);
-                if (normaliseHeadline(value) !== normaliseHeadline(result.headline)) {
-                  setPipelineStage("Ready");
-                  setPipelineNote("Custom headline ready. Analyse it to replace the previous result.");
-                }
+                setErrorMessage("");
+                setPipelineStage("Ready");
+                setPipelineNote("Headline ready. MacroLens will search for its business and economic implications.");
                 if (imageName) {
                   setOcrConfirmed(false);
                   const validation = validateHeadline(value, headlineSelectionConfidence ?? 100, true);
                   setHeadlinePlausible(validation.plausible);
                   if (!validation.plausible && value.trim()) setOcrStatus(validation.warning);
                 }
-              }} placeholder="Paste a headline, or switch to Lens to scan a newspaper…" maxLength={500} aria-describedby="headline-count" />
+              }} placeholder="Paste any headline or claim…" maxLength={500} aria-describedby="headline-scope headline-count" />
+              <p className="scope-hint" id="headline-scope">Any topic accepted · analysis stays focused on business and economics</p>
               <div id="headline-count" className="field-actions"><span>{headline.length}/500</span><button onClick={resetInput}>Clear input</button></div>
             </div>
 
@@ -662,13 +726,13 @@ export default function Home() {
       <section className="result-shell" id="analysis-result">
         <div className="result-heading">
           <span className="section-index">02 / ANALYSIS RESULT</span>
-          <div className={`mode-badge ${result.mode} ${retrievalUnavailable ? "unavailable" : result.mode === "live" ? "metadata" : ""}`}><i />{resultStateLabel}</div>
+          <div className={`mode-badge ${hasCurrentResult ? result.mode : ""} ${resultStateClass}`}><i />{resultStateLabel}</div>
         </div>
 
         {!hasCurrentResult ? <article className="retrieval-failure content-panel pending-result">
           <div className="failure-kicker"><span>Analysis pending</span><small>Source language: {detectedInputLanguage}</small></div>
-          <h2>Your custom headline is ready to analyse.</h2>
-          <div className="failure-explanation"><strong>The previous result has been cleared.</strong><p>Run analysis to create a new, clearly labelled result for this headline.</p></div>
+          <h2>{isAnalysing ? "Tracing evidence for this headline…" : "Your custom headline is ready to analyse."}</h2>
+          <div className="failure-explanation"><strong>The previous result has been cleared.</strong><p>{isAnalysing ? "MacroLens is checking source eligibility, claim support and contradiction before it renders a result." : "Run analysis to create a new, clearly labelled result for this headline."}</p></div>
         </article> : retrievalUnavailable ? <article className="retrieval-failure content-panel">
           <div className="failure-kicker"><span>Retrieval unavailable</span><small>Source language: {result.detectedLanguage}</small></div>
           <h2 className={result.headline.length > 180 ? "very-long" : result.headline.length > 90 ? "long" : ""}>“{result.headline}”</h2>
@@ -690,10 +754,11 @@ export default function Home() {
         </section>
 
         <section className="ordered-section confirmation-grid">
-          <article className="content-panel"><div className="section-title compact"><span>03</span><div><h3>What is confirmed</h3><p>Only statements supported by the current ledger.</p></div></div>{result.confirmed.length ? <><ul>{result.confirmed.map((item) => <li key={item}>{item}</li>)}</ul><small className="trace-note">Trace to confirmed claims and {confirmedEvidenceIds.join(" · ") || "the evidence ledger"}</small></> : <div className="insufficient-message">There is currently insufficient reliable evidence to verify this claim.</div>}</article>
+          <article className="content-panel"><div className="section-title compact"><span>03</span><div><h3>What is confirmed</h3><p>Only statements supported by the current ledger.</p></div></div>{result.confirmed.length ? <><ul>{result.confirmed.map((item) => <li key={item}>{item}</li>)}</ul><small className="trace-note">Trace to confirmed claims and {confirmedEvidenceIds.join(" · ") || "the evidence ledger"}</small></> : <div className="insufficient-message">No claim met the confirmation threshold. Limited support, if any, remains labelled as an inference in the claim cards and evidence ledger.</div>}</article>
           <article className="content-panel uncertainty-panel"><div className="section-title compact"><span>04</span><div><h3>What remains uncertain</h3><p>Gaps are part of the answer.</p></div></div><ul>{result.uncertain.map((item) => <li key={item}>{item}</li>)}</ul></article>
         </section>
 
+        {canRenderCausalSurface ? <>
         <section className="ordered-section map-section">
           <div className="section-title"><span>05</span><div><h3>Interactive causal map</h3><p>Select a node to inspect its evidence, reasoning and uncertainty.</p></div></div>
           <div className="map-workspace">
@@ -716,7 +781,7 @@ export default function Home() {
 
         <section className="ordered-section relevance-section">
           <div className="section-title"><span>06</span><div><h3>Why it matters</h3><p>India, youth and real-world decision relevance.</p></div></div>
-          <div className="relevance-list">{result.whyItMatters.map((item, index) => { const evidenceLinked = result.mode === "curated" && Boolean(relevanceNode?.evidenceIds.length); return <article key={item}><div><b>0{index + 1}</b><span className={`stamp ${evidenceLinked ? "inference" : "system"}`}>{evidenceLinked ? "Evidence-supported inference" : "System note"}</span></div><p>{item}</p><small>{evidenceLinked ? `Trace to ${relevanceNode?.evidenceIds.join(" · ")}` : "Product guidance · not an evidence claim"}</small></article>; })}</div>
+          <div className="relevance-list">{result.whyItMatters.map((item, index) => { const evidenceLinked = result.mode === "curated" && Boolean(relevanceNode?.evidenceIds.length); const liveHypothesis = result.mode === "live"; return <article key={item}><div><b>0{index + 1}</b><span className={`stamp ${evidenceLinked ? "inference" : liveHypothesis ? "hypothesis" : "system"}`}>{evidenceLinked ? "Evidence-supported inference" : liveHypothesis ? "Causal hypothesis" : "System note"}</span></div><p>{item}</p><small>{evidenceLinked ? `Trace to ${relevanceNode?.evidenceIds.join(" · ")}` : liveHypothesis ? "Economic pathway · requires direct evidence" : "Product guidance · not an evidence claim"}</small></article>; })}</div>
         </section>
 
         <section className="ordered-section impact-section">
@@ -729,6 +794,10 @@ export default function Home() {
           <div className="stress-grid"><article><span>Challenging evidence</span>{result.stressTest.challengingEvidence.map((item) => <p key={item}>{item}</p>)}</article><article><span>Alternative explanations</span>{result.stressTest.alternatives.map((item) => <p key={item}>{item}</p>)}</article><article><span>Missing information</span>{result.stressTest.missingInformation.map((item) => <p key={item}>{item}</p>)}</article><article><span>What changes the conclusion</span>{result.stressTest.changeConditions.map((item) => <p key={item}>{item}</p>)}</article></div>
           <div className="stress-sources"><span>Counter/context trail</span>{stressSources.length ? stressSources.map((source) => <a key={source.id} href={source.url} target="_blank" rel="noopener noreferrer"><b>{source.id}</b>{source.evidenceRole}</a>) : <small>No article-level counter-evidence retrieved.</small>}</div>
         </section>
+        </> : <section className="ordered-section causal-boundary content-panel">
+          <div className="section-title"><span>05–08</span><div><h3>No evidence-backed economic pathway</h3><p>No generic mechanism, relevance, winners or losers were generated.</p></div></div>
+          <div className="causal-boundary-copy"><strong>The retrieved evidence did not establish a reliable business or economic channel.</strong><p>MacroLens still shows the claim and evidence ledger, but does not invent an economic story from weak, unrelated or contradictory sources.</p></div>
+        </section>}
 
         <section className="ordered-section confidence-section content-panel">
           <div className="section-title"><span>09</span><div><h3>Confidence explanation</h3><p>No unsupported percentage. The category reflects evidence quality and completeness.</p></div></div>
@@ -749,12 +818,12 @@ export default function Home() {
       <section className="method-shell" id="method">
         <div className="method-heading"><span className="section-index">03 / METHOD &amp; TRANSPARENCY</span><h2>AI assists judgement. It does not replace it.</h2><p>The competition build exposes its retrieval depth, evidence role and uncertainty at every important step.</p></div>
         <div className="method-grid">
-          <article><span>01</span><h3>Claim extraction</h3><p>Curated cases use reviewed claim sets. Custom headlines use conservative rule-based decomposition; causal connectors become hypotheses.</p></article>
+          <article><span>01</span><h3>Scope and claim extraction</h3><p>Any custom headline is accepted. Claim extraction preserves the headline; retrieval adds a business-and-economics lens. Curated cases use reviewed claim sets.</p></article>
           <article><span>02</span><h3>Retrieval</h3><p>MacroLens checks read source text for direct support, explicit contradiction and hedging. Unrated websites stay context; METADATA ONLY RETRIEVED means titles or snippets were available and cannot raise confidence.</p></article>
           <article><span>03</span><h3>AI usage</h3><p>Tesseract.js first detects layout with sparse-text segmentation, then rereads only the selected region. Character confidence and headline-selection confidence remain separate.</p></article>
           <article><span>04</span><h3>Privacy</h3><p>Uploaded images are processed in the browser, shown via a temporary object URL and not sent to the MacroLens server.</p></article>
           <article><span>05</span><h3>Confidence</h3><p>High requires complete factual-claim coverage from eligible source text, no eligible contradiction and no unresolved causal claim. Counts alone cannot make confidence High.</p></article>
-          <article><span>06</span><h3>Capability boundary</h3><p>CURATED DEMO cases are manually checked. Metadata is not claim verification. Unavailable retrieval generates no causal story, and causal hypotheses are never presented as proven causation.</p></article>
+          <article><span>06</span><h3>Capability boundary</h3><p>Every headline is accepted, but MacroLens reports only evidence-linked business and economic pathways. If none is supported, it says so. Metadata is not claim verification.</p></article>
         </div>
         <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily is an optional server-side API integration for public-source retrieval. Re-audit usage, pricing and disclosures after any provider change.</small></div>
       </section>

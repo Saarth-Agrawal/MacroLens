@@ -62,8 +62,6 @@ function isGeneratedAnalysis(value: unknown): value is GeneratedAnalysis {
 export async function POST(request: Request) {
   const declaredSize = Number(request.headers.get("content-length") || 0);
   if (declaredSize > 12_000) return Response.json({ available: false, reason: "Request too large." }, { status: 413 });
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return Response.json({ available: false, reason: "AI synthesis is not configured; transparent causal-engine fallback used." }, { status: 503 });
 
   let body: { headline?: string; language?: string; sources?: SourceInput[] };
   try {
@@ -74,10 +72,12 @@ export async function POST(request: Request) {
 
   const headline = body.headline?.trim().slice(0, 500);
   if (!headline) return Response.json({ available: false, reason: "A headline is required." }, { status: 400 });
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return Response.json({ available: false, reason: "AI synthesis is not configured; transparent causal-engine fallback used." }, { status: 503 });
   const language = ["English", "हिन्दी", "मराठी"].includes(body.language || "") ? body.language : "English";
   const sources = (body.sources ?? []).slice(0, 8).map((source) => `${String(source.id || "S?").slice(0, 12)}: ${String(source.title || "Untitled source").slice(0, 240)} — ${String(source.domain || "Unknown publisher").slice(0, 100)} [${String(source.role || "Unclassified").slice(0, 40)}; ${String(source.relationship || "Unclassified").slice(0, 40)}]`).join("\n");
 
-  const prompt = `You are the causal-hypothesis layer inside MacroLens, a school competition prototype.\n\nHeadline: ${headline}\nOutput language: ${language}\nEvidence catalogue (titles and metadata only; you have not read the full articles):\n${sources || "No sources retrieved."}\n\nCreate a concise five-step chain: signal, transmission mechanism, hidden dependency, India-specific impact, and what to watch. This is not a summary. Never invent a statistic, quotation, date, named person's view or detail not present above. Treat the chain as testable hypotheses, not verified fact. Explicitly say what could break the chain. Keep each body under 38 words, each title under 8 words, and all output in the requested language. The winners/losers are potentially affected groups, not predictions. Do not claim that a source supports a causal link merely because its title is related.`;
+  const prompt = `You are the business-and-economics causal-hypothesis layer inside MacroLens, a school competition prototype.\n\nHeadline: ${headline}\nOutput language: ${language}\nEvidence catalogue (titles and metadata only; you have not read the full articles):\n${sources || "No sources retrieved."}\n\nAnalyse only credible business and economic aspects of the headline. If no such connection is supported, say so plainly and do not invent one. Create a concise five-step chain only when warranted: signal, transmission mechanism, hidden dependency, India-specific impact, and what to watch. This is not a summary. Never invent a statistic, quotation, date, named person's view or detail not present above. Treat the chain as testable hypotheses, not verified fact. Explicitly say what could break the chain. Keep each body under 38 words, each title under 8 words, and all output in the requested language. The winners/losers are potentially affected groups, not predictions. Do not claim that a source supports a causal link merely because its title is related.`;
 
   try {
     const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent", {

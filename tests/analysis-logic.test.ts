@@ -2,7 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { articleFromTavilyResult } from "../app/api/news/route.ts";
 import { buildLiveAnalysis, decomposeHeadline, detectLanguage, makeEvidenceSources, sourceTypeFor } from "../app/lib/analysis.ts";
+import { buildEconomicLensQuery } from "../app/lib/economicLens.ts";
 import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlternative, mergeLayoutAndDetail, validateHeadline } from "../app/lib/headlineOcr.ts";
+
+test("adds a business and economics lens to any headline", () => {
+  const assam = buildEconomicLensQuery("Assam floods 2026");
+  assert.match(assam, /Assam floods 2026/);
+  assert.match(assam, /production|supply|prices|jobs|trade/);
+
+  const moon = buildEconomicLensQuery("The Moon is made of cheese");
+  assert.match(moon, /The Moon is made of cheese/);
+  assert.match(moon, /business economic impact/);
+
+  const economic = "Oil prices rise after OPEC cuts output";
+  assert.equal(buildEconomicLensQuery(economic), economic);
+
+  const hindiEconomic = "आरबीआई ने रेपो दर 0.25 प्रतिशत घटाई";
+  assert.equal(buildEconomicLensQuery(hindiEconomic), hindiEconomic);
+
+  const longHeadline = "A".repeat(500);
+  assert.match(buildEconomicLensQuery(longHeadline), /business economic impact/);
+});
 
 test("detects the three supported headline languages", () => {
   assert.equal(detectLanguage("RBI keeps the repo rate unchanged"), "English");
@@ -80,6 +100,36 @@ test("activates the exact insufficient-evidence safeguard", () => {
   assert.equal(result.confidence.level, "Low");
   assert.equal(result.confirmed.length, 0);
   assert.ok(result.uncertain.includes("There is currently insufficient reliable evidence to verify this claim."));
+});
+
+test("uses a headline-specific economic frame only after a claim is confirmable", () => {
+  const result = buildLiveAnalysis("Assam floods disrupt tea production and exports in 2026", [{
+    title: "Assam floods disrupt tea production and exports in 2026",
+    url: "https://commerce.gov.in/assam-tea",
+    publisher: "Ministry of Commerce",
+    domain: "commerce.gov.in",
+    date: "2026-08-24",
+    bodyRead: true,
+    excerpt: "Assam floods disrupt tea production and exports in 2026.",
+  }]);
+  assert.equal(result.claims[0].kind, "Confirmed fact");
+  assert.equal(result.nodes[1].title, "Supply and logistics channel");
+  assert.match(result.nodes[2].title, /inventories|recovery/i);
+});
+
+test("treats ReliefWeb body text as eligible institutional analysis", () => {
+  assert.equal(sourceTypeFor("reliefweb.int"), "Data / analysis");
+  const result = buildLiveAnalysis("Assam floods 2026", [{
+    title: "India: Flash Floods - Jul 2026",
+    url: "https://reliefweb.int/disaster/ff-2026-000139-ind",
+    publisher: "ReliefWeb",
+    domain: "reliefweb.int",
+    date: "2026-08-24",
+    bodyRead: true,
+    excerpt: "The Assam floods began in July 2026 after exceptionally heavy monsoonal rainfall.",
+  }]);
+  assert.equal(result.claims[0].kind, "Evidence-supported inference");
+  assert.equal(result.nodes[1].title, "Supply and logistics channel");
 });
 
 test("uses read public-source text to corroborate a checkable claim", () => {

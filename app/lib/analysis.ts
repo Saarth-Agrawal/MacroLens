@@ -129,7 +129,7 @@ const officialDomains = [
   "rbi.org.in", "sebi.gov.in", "pib.gov.in", "mospi.gov.in", "treasury.gov", "federalreserve.gov", "bls.gov", "bea.gov", "census.gov", "sec.gov",
   "imf.org", "worldbank.org", "iea.org", "oecd.org", "un.org", "unctad.org", "who.int", "wto.org", "ecb.europa.eu", "europa.eu", "canada.ca",
 ];
-const analysisDomains = ["stlouisfed.org", "nber.org", "pewresearch.org", "ourworldindata.org", "nature.com", "science.org", "thelancet.com", "nejm.org", "jamanetwork.com"];
+const analysisDomains = ["stlouisfed.org", "nber.org", "pewresearch.org", "ourworldindata.org", "reliefweb.int", "nature.com", "science.org", "thelancet.com", "nejm.org", "jamanetwork.com"];
 const reportingDomains = [
   "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "cnbc.com", "theguardian.com", "npr.org", "ndtv.com", "axios.com", "timesofindia.indiatimes.com",
   "aljazeera.com", "cbsnews.com", "bloomberg.com", "pbs.org", "wsj.com", "washingtonpost.com", "nytimes.com", "ft.com", "economist.com", "cnn.com",
@@ -279,8 +279,123 @@ export function makeEvidenceSources(claims: Claim[], articles: RetrievedArticle[
   });
 }
 
+type EconomicCausalFrame = {
+  mechanismTitle: string;
+  mechanismSummary: string;
+  dependencyTitle: string;
+  dependencySummary: string;
+  consequenceTitle: string;
+  consequenceSummary: string;
+  relevanceTitle: string;
+  relevanceSummary: string;
+  whyItMatters: string[];
+  winners: string[];
+  losers: string[];
+  alternatives: string[];
+  missingInformation: string[];
+  changeConditions: string[];
+};
+
+function economicCausalFrame(headline: string): EconomicCausalFrame {
+  const value = headline.normalize("NFKC").toLocaleLowerCase();
+
+  if (/(?:flood|drought|monsoon|crop|tea|food|supply|production|output|shipping|freight|logistics|export|import|tariff|बाढ़|पूर|उत्पादन|पुरवठा|निर्यात|आयात|वाहतूक)/iu.test(value)) {
+    return {
+      mechanismTitle: "Supply and logistics channel",
+      mechanismSummary: "Test whether output or transport disruption changes available supply, delivery times or landed costs.",
+      dependencyTitle: "Damage, inventories and recovery",
+      dependencySummary: "The pathway depends on the affected share of production, buffer stocks, route substitution and recovery time.",
+      consequenceTitle: "Output, prices and trade",
+      consequenceSummary: "Sustained disruption could affect sales, export volumes, input costs or consumer prices; none is automatic.",
+      relevanceTitle: "Producers, workers and buyers",
+      relevanceSummary: "Check which firms, workers, regions and households are directly exposed before claiming a wider effect.",
+      whyItMatters: ["The economic effect depends on how much production and logistics are actually disrupted, and for how long.", "A local event matters more broadly only when evidence shows exposure through supply, trade, jobs or prices."],
+      winners: ["Alternative suppliers if buyers switch orders"],
+      losers: ["Affected producers, workers and logistics users"],
+      alternatives: ["Inventory buffers or substitute routes may absorb the disruption.", "A separate demand change may explain prices or sales."],
+      missingInformation: ["Affected production and shipment volumes", "Inventory buffers and recovery timeline"],
+      changeConditions: ["Official output or trade data confirms disruption", "Multiple eligible sources document the same supply pathway"],
+    };
+  }
+
+  if (/(?:rbi|repo|central bank|interest|loan|credit|emi|bank|monetary|आरबीआई|आरबीआय|रेपो|ब्याज|व्याज|कर्ज|बैंक|बँक)/iu.test(value)) {
+    return {
+      mechanismTitle: "Credit and rate pass-through",
+      mechanismSummary: "Test whether the policy or funding change reaches deposit, loan and bond rates used by households and firms.",
+      dependencyTitle: "Bank pricing and borrower mix",
+      dependencySummary: "Transmission depends on funding costs, competition, loan resets, risk and the share of fixed-rate borrowing.",
+      consequenceTitle: "Borrowing, saving and demand",
+      consequenceSummary: "Financing conditions could influence EMIs, investment, saving and demand, but the timing and size remain conditional.",
+      relevanceTitle: "Borrowers, savers and firms",
+      relevanceSummary: "Check product-level rate changes before assigning gains or losses to Indian households or businesses.",
+      whyItMatters: ["A policy-rate decision affects people only through actual changes in deposit, lending and market rates.", "The same decision can affect borrowers, savers and firms differently."],
+      winners: ["Borrowers if lending rates fall and reset"],
+      losers: ["Savers if deposit yields decline"],
+      alternatives: ["Banks may not pass the policy change through quickly.", "Credit risk or funding costs may outweigh the policy signal."],
+      missingInformation: ["Loan and deposit repricing data", "Borrower mix and reset schedules"],
+      changeConditions: ["Banks publish corresponding product-rate changes", "Credit and demand data show a measurable response"],
+    };
+  }
+
+  if (/(?:oil|gas|coal|electricity|energy|fuel|तेल|गैस|गॅस|बिजली|वीज|ऊर्जा)/iu.test(value)) {
+    return {
+      mechanismTitle: "Energy-cost pass-through",
+      mechanismSummary: "Test whether the energy change reaches power, transport or production costs for exposed sectors.",
+      dependencyTitle: "Contracts, hedges and regulation",
+      dependencySummary: "The effect depends on contract terms, hedging, inventories, taxes, subsidies and regulated tariffs.",
+      consequenceTitle: "Margins, output and prices",
+      consequenceSummary: "Persistent cost changes could affect company margins, production decisions and consumer prices.",
+      relevanceTitle: "Energy-intensive Indian exposure",
+      relevanceSummary: "Identify imported-energy dependence and sector-level use before claiming an India-wide effect.",
+      whyItMatters: ["Energy is an input across transport and production, but pass-through varies sharply by sector.", "Contracts, taxes and regulation can delay or reverse the apparent headline effect."],
+      winners: ["Energy-efficient or hedged firms"],
+      losers: ["Unhedged energy-intensive producers and transport users"],
+      alternatives: ["Currency or tax changes may explain domestic prices instead.", "Hedging and long-term contracts may delay pass-through."],
+      missingInformation: ["Import exposure and contract terms", "Sector-level energy intensity"],
+      changeConditions: ["Wholesale and retail energy prices move together", "Company disclosures show a material cost effect"],
+    };
+  }
+
+  if (/(?:company|firm|startup|profit|earnings|revenue|sales|margin|merger|acquisition|ipo|investment|कंपनी|नफा|मुनाफा|महसूल|राजस्व|कमाई|निवेश|गुंतवणूक)/iu.test(value)) {
+    return {
+      mechanismTitle: "Firm cash-flow and strategy",
+      mechanismSummary: "Test whether the event changes revenue, costs, financing, competitive position or capital allocation.",
+      dependencyTitle: "Execution and market response",
+      dependencySummary: "The pathway depends on customer demand, execution, financing terms and competitor behaviour.",
+      consequenceTitle: "Margins, investment and jobs",
+      consequenceSummary: "A sustained business effect could influence margins, investment or hiring, but those outcomes need direct evidence.",
+      relevanceTitle: "Customers, workers and investors",
+      relevanceSummary: "Separate company-specific exposure from broader sector or household relevance.",
+      whyItMatters: ["A company announcement matters economically only when it changes cash flow, competition, investment or jobs.", "Execution evidence is more informative than the announcement alone."],
+      winners: ["Customers or competitors that gain from the change"],
+      losers: ["Exposed workers, suppliers or investors if execution fails"],
+      alternatives: ["The announcement may not change delivered products or financial results.", "A wider sector trend may explain the same outcome."],
+      missingInformation: ["Company filings and delivered milestones", "Revenue, cost and customer evidence"],
+      changeConditions: ["Audited filings confirm the financial effect", "Operational data confirms execution"],
+    };
+  }
+
+  return {
+    mechanismTitle: "Price, income and incentive channel",
+    mechanismSummary: "Test whether the event changes a price, cost, income, incentive or access to finance.",
+    dependencyTitle: "Exposure, timing and substitution",
+    dependencySummary: "The pathway depends on who is exposed, when contracts reset and whether substitutes are available.",
+    consequenceTitle: "Demand, output and distribution",
+    consequenceSummary: "Any effect on spending, production or distribution remains conditional until directly supported.",
+    relevanceTitle: "India and decision relevance",
+    relevanceSummary: "Identify a documented exposure for Indian households, workers or firms before claiming local impact.",
+    whyItMatters: ["Economic relevance depends on a documented path from the event to prices, income, finance or incentives.", "The evidence ledger shows where that path is supported and where it remains a hypothesis."],
+    winners: ["Groups insulated from the documented change"],
+    losers: ["Groups directly exposed to the documented change"],
+    alternatives: ["A separate demand, policy or supply change may explain the outcome.", "Timing or substitution may weaken the apparent relationship."],
+    missingInformation: ["Magnitude and timing of the economic exposure", "Comparable data before and after the event"],
+    changeConditions: ["Eligible sources document the transmission channel", "Independent data shows the expected economic response"],
+  };
+}
+
 export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]): AnalysisResult {
   const language = detectLanguage(headline);
+  const causalFrame = economicCausalFrame(headline);
   const claims = decomposeHeadline(headline);
   const sources = makeEvidenceSources(claims, articles);
   const contextualIds = sources.filter((source) => source.evidenceRole !== "Insufficient evidence").map((source) => source.id);
@@ -355,6 +470,10 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
         ? `${unratedRelatedSources.length} matching unrated web source${unratedRelatedSources.length === 1 ? " was" : "s were"} excluded from support and confidence.`
         : hasContext ? "Related or ambiguous sources remain context only." : "No sufficiently related source was found.",
     ];
+  const limitedSupportNote = fullTextSupportingSources.length
+    ? "Verification-eligible source text provides limited support, but the confirmation threshold was not met."
+    : warning;
+  const primaryClaimKind = assessedClaims[0]?.kind;
 
   return {
     id: `live-${Date.now()}`,
@@ -372,25 +491,25 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     claims: assessedClaims,
     confirmed,
     uncertain: [
-      hasConflict ? "At least one verification-eligible source directly contradicts a decomposed claim." : warning,
+      hasConflict ? "At least one verification-eligible source directly contradicts a decomposed claim." : limitedSupportNote,
       "Metadata-only and unrated sources cannot verify a claim, regardless of how many are retrieved.",
       "Explicit contradiction cues are detected, but subtle framing, satire and complex semantics still require human review.",
     ],
     nodes: [
-      { id: "signal", layer: "Signal", title: hasConflict ? "Claim challenged by source text" : confirmed.length ? "Claim corroborated by source text" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: assessedClaims[0]?.kind || "Unverified claim", confidence: confidenceLevel, evidenceIds: contextualIds, uncertainty: hasConflict ? "The retrieved evidence contains a direct contradiction, so this claim is not confirmed." : confirmed.length ? "Corroboration is limited to verification-eligible fetched text and does not prove every implication." : warning },
-      { id: "mechanism", layer: "Mechanism", title: "Possible transmission channel", summary: "Identify the price, incentive, institution or behaviour that would carry the effect forward.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No article-body evidence has verified this connection." },
-      { id: "dependency", layer: "Hidden dependency", title: "Assumption not yet tested", summary: "The implied explanation may depend on timing, geography, market structure or another event omitted from the headline.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "The necessary assumption has not been established." },
-      { id: "consequence", layer: "Wider consequence", title: "Consequences remain conditional", summary: "Potential effects should not be presented as outcomes until the mechanism and exposure are supported.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "Magnitude, direction and affected groups remain open." },
-      { id: "relevance", layer: "Relevance", title: "India and youth check", summary: "Look for a documented India-specific exposure before claiming relevance to households, students or firms.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No local impact is verified by the current retrieval." },
+      { id: "signal", layer: "Signal", title: hasConflict ? "Claim challenged by source text" : confirmed.length ? "Claim corroborated by source text" : primaryClaimKind === "Evidence-supported inference" ? "Claim has limited source support" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: primaryClaimKind || "Unverified claim", confidence: confidenceLevel, evidenceIds: contextualIds, uncertainty: hasConflict ? "The retrieved evidence contains a direct contradiction, so this claim is not confirmed." : confirmed.length ? "Corroboration is limited to verification-eligible fetched text and does not prove every implication." : limitedSupportNote },
+      { id: "mechanism", layer: "Mechanism", title: causalFrame.mechanismTitle, summary: causalFrame.mechanismSummary, kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No verification-eligible source directly establishes this transmission channel." },
+      { id: "dependency", layer: "Hidden dependency", title: causalFrame.dependencyTitle, summary: causalFrame.dependencySummary, kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "The necessary exposure and timing conditions have not been established." },
+      { id: "consequence", layer: "Wider consequence", title: causalFrame.consequenceTitle, summary: causalFrame.consequenceSummary, kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "Magnitude, direction and affected groups remain open." },
+      { id: "relevance", layer: "Relevance", title: causalFrame.relevanceTitle, summary: causalFrame.relevanceSummary, kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No source directly verifies this local or decision-level exposure." },
     ],
-    whyItMatters: ["The uncertainty is itself useful: MacroLens refuses to turn related headlines into false confirmation.", "A judge or reader can inspect what was retrieved and see exactly what remains missing."],
-    winners: ["No evidence-supported winner identified"],
-    losers: ["No evidence-supported loser identified"],
+    whyItMatters: causalFrame.whyItMatters,
+    winners: causalFrame.winners,
+    losers: causalFrame.losers,
     stressTest: {
       challengingEvidence: [hasConflict ? `${fullTextContradictingSources.map((source) => source.id).join(" and ")} directly contradict the claim.` : fullTextSources.length ? "Read source text can corroborate the stated claim, but it may not establish every wider cause or consequence." : "No article-body counter-evidence was available in this retrieval."],
-      alternatives: ["A different event may explain the same outcome.", "The headline may be opinion, satire, prediction or correlation rather than a factual causal statement."],
-      missingInformation: ["Primary-source confirmation", "Article-body evidence", ...claims.filter((claim) => !linkedClaimIds.has(claim.id)).map((claim) => `Evidence for ${claim.id}`)],
-      changeConditions: ["A primary source confirms the event", "Independent reporting agrees after reviewing the same facts", "Evidence directly tests the causal link"],
+      alternatives: causalFrame.alternatives,
+      missingInformation: [...causalFrame.missingInformation, ...claims.filter((claim) => !linkedClaimIds.has(claim.id)).map((claim) => `Evidence for ${claim.id}`)],
+      changeConditions: causalFrame.changeConditions,
     },
     confidence: {
       level: confidenceLevel,

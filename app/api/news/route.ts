@@ -1,3 +1,5 @@
+import { buildEconomicLensQuery } from "../../lib/economicLens.ts";
+
 export type NewsArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
 
 const readableHosts = new Set([
@@ -192,7 +194,9 @@ export async function POST(request: Request) {
 
   let body: { query?: string };
   try { body = await request.json(); } catch { return Response.json({ articles: [], provider: "none", limitation: "Invalid request." }, { status: 400, headers: responseHeaders }); }
-  const query = body.query?.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 220);
+  const rawQuery = body.query?.trim().slice(0, 500) || "";
+  if (!rawQuery) return Response.json({ articles: [], provider: "none", limitation: "A search query is required." }, { status: 400, headers: responseHeaders });
+  const query = buildEconomicLensQuery(rawQuery).replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 320);
   if (!query) return Response.json({ articles: [], provider: "none", limitation: "A search query is required." }, { status: 400, headers: responseHeaders });
 
   const tavilyKey = process.env.TAVILY_API_KEY;

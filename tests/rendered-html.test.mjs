@@ -53,12 +53,12 @@ test("rejects an empty retrieval query instead of returning a fabricated result"
   assert.match(payload.limitation, /required/i);
 });
 
-test("optional generative synthesis fails transparently when it is not configured", async () => {
+test("any non-empty headline reaches the optional economic synthesis boundary", async () => {
   const worker = await loadWorker();
   const response = await worker.fetch(new Request("http://localhost/api/analyze", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ headline: "Test headline" }),
+    body: JSON.stringify({ headline: "The Moon is made of cheese" }),
   }), env, context);
   assert.equal(response.status, 503);
   const payload = await response.json();

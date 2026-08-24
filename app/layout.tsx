@@ -10,7 +10,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "MacroLens — Evidence-Linked Causal Intelligence",
-  description: "Turn headlines into claim-level evidence, causal maps, uncertainty and real-world relevance.",
+  description: "Examine the evidence-linked business and economic pathways behind any headline.",
   applicationName: "MacroLens",
   keywords: ["media intelligence", "causal map", "economic literacy", "evidence", "OCR"],
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
