@@ -705,8 +705,8 @@ export default function Home() {
 
       <section className="intro-shell">
         <div className="intro-copy">
-          <p className="eyebrow"><i /> EVIDENCE-LINKED ECONOMIC INTELLIGENCE</p>
-          <h1>What&rsquo;s really happening <em>behind the headline?</em></h1>
+          <p className="eyebrow">EVIDENCE-LINKED ECONOMIC INTELLIGENCE</p>
+          <h1>What&rsquo;s really happening <span>behind the headline?</span></h1>
           <p>Paste a headline, article, or screenshot. We&rsquo;ll show you what&rsquo;s true, what it means, and what could happen next.</p>
           <div className="hero-actions">
             <button className="live-lens-button" onClick={() => { resetInput(); setInputMode("text"); window.setTimeout(() => headlineInputRef.current?.focus(), 300); window.setTimeout(() => document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }), 20); }}>Analyse a headline <span>↗</span></button>
@@ -936,7 +936,7 @@ export default function Home() {
 
         <div className={`collapse deep-dive-collapse ${deepDiveOpen ? "open" : ""}`}><div className="collapse-inner">
         <div className="deep-dive">
-          <section className="ordered-section claims-section">
+          <section className="ordered-section claims-section reveal">
             <div className="section-title"><span>05</span><div><h3>Extracted claims</h3><p>Each statement receives its own evidence status.</p></div></div>
             <div className="claims-grid">{result.claims.map((claim) => <article className="claim-card" key={claim.id} onPointerMove={handleTilt} onPointerLeave={resetTilt}><div><b>{claim.id}</b><span className="claim-category">{claim.category}</span><span className={`stamp ${kindClass(claim.kind)}`}>{claim.kind}</span></div><p>{claim.text}</p><footer>{claim.evidenceIds.length ? <span>Linked: {claim.evidenceIds.join(" · ")}</span> : <span className="missing">No supporting evidence linked</span>}</footer></article>)}</div>
           </section>
