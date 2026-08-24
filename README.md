@@ -14,12 +14,14 @@ The competition flow turns a typed, pasted or scanned headline into checkable cl
 - Tavily public-source search and clean-text retrieval when `TAVILY_API_KEY` is configured, with GDELT DOC 2.0 and Google News RSS fallbacks
 - No database, accounts or image uploads to the server
 - Three fixed pre-verified competition cases in `app/data/demoCases.ts`
-- Conservative live metadata mode for arbitrary headlines
+- Conservative live evidence mode for arbitrary headlines
 
 ## Reliability contract
 
 - Curated and live results are never presented as the same thing.
-- Live sources can support a claim only when Tavily returns matching public-source text; otherwise titles remain clearly labelled metadata/context only.
+- Live sources can support a claim only when read text from a verification-eligible domain makes a direct, non-negated, stance-clear match. Unrated domains, Tavily snippets and titles remain context only.
+- Explicit refutations and directional conflicts are labelled `Contradicts`; any eligible contradiction prevents High confidence.
+- High confidence requires all factual headline claims to meet the primary-or-three-independent-source threshold, with no unresolved causal claim.
 - Every causal node exposes its statement type, confidence category, evidence links and uncertainty.
 - Missing evidence activates the exact insufficient-evidence safeguard.
 - OCR text must be reviewed and confirmed before analysis.

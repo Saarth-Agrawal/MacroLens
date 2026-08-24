@@ -5,6 +5,7 @@ export type RetrievedArticle = { title: string; url: string; publisher: string; 
 
 const stopWords = new Set([
   "the", "a", "an", "and", "or", "as", "after", "because", "amid", "following", "due", "to", "of", "in", "on", "for", "with", "at", "by",
+  "is", "are", "was", "were", "be", "been", "being", "has", "have", "had", "will", "would", "can", "could", "may", "might", "about", "roughly", "approximately",
   "की", "का", "के", "से", "में", "और", "बाद", "मुळे", "नंतर", "मध्ये", "आणि", "चा", "ची", "चे",
 ]);
 
@@ -104,12 +105,16 @@ export function decomposeHeadline(headline: string): Claim[] {
   return [claim("C1", sentence(clean), "Event")];
 }
 
-function tokens(text: string) {
+function tokenList(text: string) {
   const normalised = text.toLowerCase().replace(/\bu\.?\s*s\.?\b/gu, "usa");
-  return new Set(normalised.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).map((word) => {
+  return normalised.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).map((word) => {
     if (["america", "american", "us", "united"].includes(word)) return "usa";
     return word;
-  }).filter((word) => word.length > 2 && !stopWords.has(word)));
+  }).filter((word) => (word.length > 2 || /\d/.test(word)) && !stopWords.has(word));
+}
+
+function tokens(text: string) {
+  return new Set(tokenList(text));
 }
 
 function overlap(left: string, right: string) {
@@ -120,65 +125,156 @@ function overlap(left: string, right: string) {
   return count;
 }
 
-function corroboratesClaim(claim: Claim, article: RetrievedArticle) {
-  if (!article.bodyRead || !article.excerpt) return false;
-  const claimTokens = [...tokens(claim.text)];
-  if (!claimTokens.length) return false;
-  const articleTokens = tokens(`${article.title} ${article.excerpt}`);
-  const matched = claimTokens.filter((word) => articleTokens.has(word));
-  const numberTokens = claimTokens.filter((word) => /\d/.test(word));
-  const numericMatch = numberTokens.every((word) => articleTokens.has(word));
-  return numericMatch && matched.length / claimTokens.length >= 0.6;
+const officialDomains = [
+  "rbi.org.in", "sebi.gov.in", "pib.gov.in", "mospi.gov.in", "treasury.gov", "federalreserve.gov", "bls.gov", "bea.gov", "census.gov", "sec.gov",
+  "imf.org", "worldbank.org", "iea.org", "oecd.org", "un.org", "unctad.org", "who.int", "wto.org", "ecb.europa.eu", "europa.eu", "canada.ca",
+];
+const analysisDomains = ["stlouisfed.org", "nber.org", "pewresearch.org", "ourworldindata.org", "nature.com", "science.org", "thelancet.com", "nejm.org", "jamanetwork.com"];
+const reportingDomains = [
+  "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "cnbc.com", "theguardian.com", "npr.org", "ndtv.com", "axios.com", "timesofindia.indiatimes.com",
+  "aljazeera.com", "cbsnews.com", "bloomberg.com", "pbs.org", "wsj.com", "washingtonpost.com", "nytimes.com", "ft.com", "economist.com", "cnn.com",
+  "abcnews.go.com", "nbcnews.com", "usatoday.com", "politico.com", "thehindu.com", "indianexpress.com", "business-standard.com", "livemint.com", "fortune.com", "time.com", "dw.com",
+];
+const trustedDomains = [...officialDomains, ...analysisDomains, ...reportingDomains];
+const governmentSuffixes = [".gov", ".gov.in", ".gov.uk", ".gov.au", ".gc.ca", ".gouv.fr", ".go.jp", ".go.kr", ".gov.sg", ".govt.nz", ".gov.za", ".gov.br"];
+
+function normaliseHost(domain: string) {
+  return domain.trim().toLowerCase().replace(/^https?:\/\//, "").split(/[/:]/)[0].replace(/^www\./, "").replace(/\.$/, "");
 }
 
-function headlineCorroboratesClaim(claim: Claim, article: RetrievedArticle) {
-  const claimTokens = [...tokens(claim.text)];
-  if (!claimTokens.length) return false;
-  const titleTokens = tokens(article.title);
-  const matched = claimTokens.filter((word) => titleTokens.has(word));
-  const numberTokens = claimTokens.filter((word) => /\d/.test(word));
-  return numberTokens.every((word) => titleTokens.has(word)) && matched.length / claimTokens.length >= 0.6;
+function hostMatches(host: string, root: string) {
+  return host === root || host.endsWith(`.${root}`);
 }
 
-export function sourceTypeFor(domain: string, publisher: string): SourceType {
-  const value = `${domain} ${publisher}`.toLowerCase();
-  if (/rbi\.org|\.gov\.|\.gov$|imf\.org|worldbank\.org|iea\.org|unctad\.org|un\.org|oecd\.org|reserve bank|international monetary fund|international energy agency|un trade/.test(value)) return "Official / primary";
-  if (/data|statistics|federal reserve|research|institute|university/.test(value)) return "Data / analysis";
-  return "Independent reporting";
+function trustedRoot(host: string) {
+  return trustedDomains.find((domain) => hostMatches(host, domain));
+}
+
+export function sourceTypeFor(domain: string): SourceType {
+  const host = normaliseHost(domain);
+  if (officialDomains.some((domain) => hostMatches(host, domain)) || governmentSuffixes.some((suffix) => host.endsWith(suffix))) return "Official / primary";
+  if (analysisDomains.some((domain) => hostMatches(host, domain))) return "Data / analysis";
+  if (reportingDomains.some((domain) => hostMatches(host, domain))) return "Independent reporting";
+  return "Unrated web source";
+}
+
+const contradictionPattern = /\b(?:not|never|false|falsely|fake|incorrect|inaccurate|misleading|myth|hoax|fabricated|untrue|debunk(?:ed|s|ing)?|refut(?:e|ed|es|ing)|reject(?:ed|s|ing)?|den(?:y|ied|ies)|contradict(?:s|ed|ory)?|unsupported|baseless|cannot|isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|doesn['’]?t|didn['’]?t|hasn['’]?t|haven['’]?t|no evidence|no longer|without evidence)\b|(?:नहीं|नही|गलत|झूठ|फर्जी|अफवाह|खंडन|नाही|चुकीचे|खोटे|बनावट)/iu;
+const ambiguityPattern = /\b(?:claims?|alleges?|allegedly|rumou?rs?|unconfirmed|reportedly|viral post|questions? whether|fact[- ]?check|satire|parody|opinion|commentary|editorial|could|may|might|possibly|perhaps|unclear|disputed|little evidence|insufficient evidence|expected to|set to|projected to|forecast to)\b/iu;
+const predictiveClaimPattern = /\b(?:will|would|could|may|might|expected|forecast|forecasted|projected|predicted|likely|plans?|aims?|targets?|set to)\b/iu;
+const directionalPairs: Array<[Set<string>, Set<string>]> = [
+  [new Set(["rise", "rises", "rose", "rising", "increase", "increases", "increased", "higher", "climb", "climbs", "surge", "surges", "gain", "gains"]), new Set(["fall", "falls", "fell", "falling", "decrease", "decreases", "decreased", "lower", "drop", "drops", "decline", "declines", "retreat", "retreats"])],
+  [new Set(["approve", "approves", "approved", "accept", "accepts", "accepted", "support", "supports", "supported"]), new Set(["reject", "rejects", "rejected", "oppose", "opposes", "opposed", "block", "blocks", "blocked"])],
+  [new Set(["accelerate", "accelerates", "accelerated", "speed", "speeds", "faster"]), new Set(["slow", "slows", "slowed", "slower", "decelerate", "decelerates"])],
+];
+
+function directionConflicts(claimWords: string[], passageWords: string[]) {
+  return directionalPairs.some(([left, right]) => {
+    const claimLeft = claimWords.some((word) => left.has(word));
+    const claimRight = claimWords.some((word) => right.has(word));
+    const passageLeft = passageWords.some((word) => left.has(word));
+    const passageRight = passageWords.some((word) => right.has(word));
+    return (claimLeft && passageRight && !passageLeft) || (claimRight && passageLeft && !passageRight);
+  });
+}
+
+function orderedCoverage(needle: string[], haystack: string[]) {
+  let matched = 0;
+  for (const word of haystack) if (word === needle[matched]) matched += 1;
+  return needle.length ? matched / needle.length : 0;
+}
+
+function matchingBigrams(needle: string[], haystack: string[]) {
+  const haystackBigrams = new Set(haystack.slice(0, -1).map((word, index) => `${word}\u0000${haystack[index + 1]}`));
+  return needle.slice(0, -1).filter((word, index) => haystackBigrams.has(`${word}\u0000${needle[index + 1]}`)).length;
+}
+
+type ClaimAssessment = { role: EvidenceRole; passage: string };
+
+function assessClaimAgainstArticle(claim: Claim, article: RetrievedArticle): ClaimAssessment {
+  const titleOverlap = overlap(claim.text, article.title);
+  if (!article.bodyRead || !article.excerpt) return { role: titleOverlap >= 2 ? "Adds context" : "Insufficient evidence", passage: article.title };
+
+  const claimWords = tokenList(claim.text);
+  const claimNumbers = claimWords.filter((word) => /\d/.test(word));
+  const passages = [article.title, ...article.excerpt.split(/(?<=[.!?।])\s+|\n+/u)].map((value) => value.trim()).filter(Boolean);
+  let bestRelated: ClaimAssessment = { role: titleOverlap >= 2 ? "Adds context" : "Insufficient evidence", passage: article.title };
+  let bestRelatedScore = titleOverlap;
+  let support: ClaimAssessment | undefined;
+
+  for (const passage of passages) {
+    const passageWords = tokenList(passage);
+    const passageTokens = new Set(passageWords);
+    const matched = claimWords.filter((word) => passageTokens.has(word));
+    const matchRatio = claimWords.length ? matched.length / claimWords.length : 0;
+    const numericMatch = claimNumbers.every((word) => passageTokens.has(word));
+    const sequenceMatch = orderedCoverage(claimWords, passageWords);
+    const bigramThreshold = Math.min(2, Math.max(1, claimWords.length - 1));
+    const directMatch = claimWords.length > 0 && numericMatch && matchRatio >= 0.75 && (sequenceMatch >= 0.9 || matchingBigrams(claimWords, passageWords) >= bigramThreshold);
+    const directionalConflict = directionConflicts(claimWords, passageWords);
+    const nonDirectionalClaimWords = claimWords.filter((word) => !directionalPairs.some(([left, right]) => left.has(word) || right.has(word)));
+    const nonDirectionalMatch = nonDirectionalClaimWords.filter((word) => passageTokens.has(word)).length / Math.max(1, nonDirectionalClaimWords.length);
+    const cleanedPassage = passage.replace(/\bnot only\b/giu, "");
+
+    if ((directMatch && contradictionPattern.test(cleanedPassage)) || (directionalConflict && numericMatch && nonDirectionalMatch >= 0.6)) {
+      return { role: "Contradicts", passage };
+    }
+    if (directMatch && (ambiguityPattern.test(passage) || passage.includes("?"))) {
+      if (matched.length > bestRelatedScore) {
+        bestRelated = { role: "Adds context", passage };
+        bestRelatedScore = matched.length;
+      }
+      continue;
+    }
+    if (directMatch) support = { role: "Supports", passage };
+    if (matched.length >= 2 && matchRatio >= 0.5 && matched.length > bestRelatedScore) {
+      bestRelated = { role: "Adds context", passage };
+      bestRelatedScore = matched.length;
+    }
+  }
+
+  return support ?? bestRelated;
 }
 
 export function makeEvidenceSources(claims: Claim[], articles: RetrievedArticle[]): EvidenceSource[] {
-  const metadataConsensusClaims = new Set(claims.filter((claim) => {
-    const publishers = new Set(articles.filter((article) => headlineCorroboratesClaim(claim, article)).map((article) => article.domain.toLowerCase()));
-    return publishers.size >= 3;
-  }).map((claim) => claim.id));
   return articles.slice(0, 8).map((article, index) => {
-    const ranked = claims.map((claim) => ({ id: claim.id, score: overlap(claim.text, article.title) })).sort((a, b) => b.score - a.score);
-    const bestScore = ranked[0]?.score ?? 0;
-    const corroboratedClaims = claims.filter((claim) => corroboratesClaim(claim, article)).map((claim) => claim.id);
-    const consensusClaims = claims.filter((claim) => metadataConsensusClaims.has(claim.id) && headlineCorroboratesClaim(claim, article)).map((claim) => claim.id);
-    const relatedClaims = corroboratedClaims.length ? corroboratedClaims : ranked.filter((item) => item.score === bestScore && bestScore >= 2).map((item) => item.id);
-    const supportedClaims = corroboratedClaims.length ? corroboratedClaims : consensusClaims;
-    const evidenceRole: EvidenceRole = supportedClaims.length ? "Supports" : relatedClaims.length ? "Adds context" : "Insufficient evidence";
+    const sourceType = sourceTypeFor(article.domain);
+    const assessments = claims.map((claim) => ({ claim, ...assessClaimAgainstArticle(claim, article) }));
+    const strongestRole: EvidenceRole = assessments.some((item) => item.role === "Contradicts")
+      ? "Contradicts"
+      : assessments.some((item) => item.role === "Supports")
+      ? "Supports"
+      : assessments.some((item) => item.role === "Adds context")
+      ? "Adds context"
+      : "Insufficient evidence";
+    const strongest = assessments.filter((item) => item.role === strongestRole);
+    const eligible = sourceType !== "Unrated web source";
+    const evidenceRole: EvidenceRole = !eligible && (strongestRole === "Supports" || strongestRole === "Contradicts") ? "Adds context" : strongestRole;
+    const relatedClaims = strongest.map((item) => item.claim.id);
+    const passage = strongest[0]?.passage?.slice(0, 360) || article.title;
+    const note = !eligible && (strongestRole === "Supports" || strongestRole === "Contradicts")
+      ? `Matching text was found, but ${article.domain} is an unrated web source. It is excluded from support and confidence: “${passage}”`
+      : evidenceRole === "Supports"
+      ? `Verification-eligible source text directly supports ${relatedClaims.join(", ")}: “${passage}”`
+      : evidenceRole === "Contradicts"
+      ? `Verification-eligible source text directly contradicts ${relatedClaims.join(", ")}: “${passage}”`
+      : evidenceRole === "Adds context"
+      ? article.bodyRead
+        ? `The source text is related but hedged, ambiguous, or not a direct stance-clear match: “${passage}”`
+        : "Only title metadata was available. Metadata can add context but cannot support or contradict a claim."
+      : article.bodyRead
+      ? "The read source text does not contain a direct, stance-clear match for a decomposed claim."
+      : "The retrieved title is not close enough to verify a decomposed claim.";
     return {
       id: `S${index + 1}`,
       title: article.title,
       publisher: article.publisher || article.domain,
       date: article.date || "Date unavailable",
       url: article.url,
-      sourceType: sourceTypeFor(article.domain, article.publisher),
-      relatedClaims: supportedClaims.length ? supportedClaims : relatedClaims,
+      sourceType,
+      relatedClaims,
       evidenceRole,
-      verificationDepth: corroboratedClaims.length ? "full-text" : consensusClaims.length ? "headline-consensus" : undefined,
-      note: evidenceRole === "Supports"
-        ? corroboratedClaims.length
-          ? `A public article page was read. Matching excerpt: “${article.excerpt?.slice(0, 360)}”`
-          : "This source is one of at least three independent headlines that directly match the same simple factual claim. Article text was not read."
-        : evidenceRole === "Adds context"
-        ? article.bodyRead
-          ? "A public article page was read, but its available text did not corroborate this decomposed claim."
-          : "Title and metadata appear related. MacroLens could not read this article page, so this source is context—not claim verification."
-        : "The retrieved title is not close enough to verify a decomposed claim.",
+      verificationDepth: article.bodyRead ? "full-text" : undefined,
+      note,
     };
   });
 }
@@ -187,33 +283,53 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
   const language = detectLanguage(headline);
   const claims = decomposeHeadline(headline);
   const sources = makeEvidenceSources(claims, articles);
-  const contextualIds = sources.filter((source) => source.evidenceRole === "Adds context" || source.evidenceRole === "Supports").map((source) => source.id);
+  const contextualIds = sources.filter((source) => source.evidenceRole !== "Insufficient evidence").map((source) => source.id);
   const fullTextSources = sources.filter((source) => source.verificationDepth === "full-text");
   const fullTextSupportingSources = fullTextSources.filter((source) => source.evidenceRole === "Supports");
-  const headlineConsensusSources = sources.filter((source) => source.verificationDepth === "headline-consensus");
+  const fullTextContradictingSources = fullTextSources.filter((source) => source.evidenceRole === "Contradicts");
+  const unratedRelatedSources = sources.filter((source) => source.sourceType === "Unrated web source" && source.relatedClaims.length > 0);
   const hasContext = contextualIds.length > 0;
   const warning = "There is currently insufficient reliable evidence to verify this claim.";
   const linkedClaimIds = new Set(sources.flatMap((source) => source.relatedClaims));
+  const sourceOrganisation = (source: EvidenceSource) => {
+    try {
+      const host = normaliseHost(new URL(source.url).hostname);
+      return trustedRoot(host) ?? host;
+    } catch {
+      return source.publisher.trim().toLowerCase();
+    }
+  };
+  const directSupportFor = (claim: Claim) => fullTextSupportingSources.filter((source) => source.relatedClaims.includes(claim.id));
+  const directContradictionFor = (claim: Claim) => fullTextContradictingSources.filter((source) => source.relatedClaims.includes(claim.id));
+  const stronglySupportedClaimIds = new Set(claims.filter((claim) => {
+    const supporting = directSupportFor(claim);
+    const independentOrganisations = new Set(supporting.map(sourceOrganisation));
+    return supporting.some((source) => source.sourceType === "Official / primary") || independentOrganisations.size >= 3;
+  }).map((claim) => claim.id));
   const assessedClaims = claims.map((claim) => {
-    const supporting = fullTextSupportingSources.filter((source) => source.relatedClaims.includes(claim.id));
-    const headlineConsensus = articles.filter((article) => headlineCorroboratesClaim(claim, article));
-    const independentHeadlinePublishers = new Set(headlineConsensus.map((article) => article.domain.toLowerCase())).size;
-    const hasPrimary = supporting.some((source) => source.sourceType === "Official / primary");
-    const kind: Claim["kind"] = hasPrimary || supporting.length >= 2 ? "Confirmed fact" : supporting.length === 1 || independentHeadlinePublishers >= 3 ? "Evidence-supported inference" : claim.kind;
+    const supporting = directSupportFor(claim);
+    const contradicted = directContradictionFor(claim).length > 0;
+    const predictive = predictiveClaimPattern.test(claim.text);
+    const kind: Claim["kind"] = claim.category === "Causal hypothesis"
+      ? "Causal hypothesis"
+      : contradicted
+      ? "Unverified claim"
+      : stronglySupportedClaimIds.has(claim.id) && !predictive
+      ? "Confirmed fact"
+      : supporting.length
+      ? "Evidence-supported inference"
+      : "Unverified claim";
     return { ...claim, kind, evidenceIds: sources.filter((source) => source.relatedClaims.includes(claim.id)).map((source) => source.id) };
   });
   const confirmed = assessedClaims.filter((claim) => claim.kind === "Confirmed fact").map((claim) => `${claim.text} This is corroborated by ${claim.evidenceIds.filter((id) => sources.find((source) => source.id === id)?.evidenceRole === "Supports").join(" and ")}.`);
-  const directSupportFor = (claim: Claim) => fullTextSupportingSources.filter((source) => source.relatedClaims.includes(claim.id));
-  const highConfidenceClaim = assessedClaims.find((claim) => {
-    const directSupport = directSupportFor(claim);
-    const independentPublishers = new Set(directSupport.map((source) => source.publisher.trim().toLowerCase()).filter(Boolean));
-    return directSupport.some((source) => source.sourceType === "Official / primary") || independentPublishers.size >= 2;
-  });
-  const directSupportForHighConfidenceClaim = highConfidenceClaim ? directSupportFor(highConfidenceClaim) : [];
-  const directSupportPublisherCount = new Set(directSupportForHighConfidenceClaim.map((source) => source.publisher.trim().toLowerCase()).filter(Boolean)).size;
-  const confidenceLevel = highConfidenceClaim
+  const factualClaims = assessedClaims.filter((claim) => claim.category !== "Causal hypothesis");
+  const hasCausalHypothesis = assessedClaims.some((claim) => claim.category === "Causal hypothesis");
+  const allFactualClaimsStrong = factualClaims.length > 0 && factualClaims.every((claim) => stronglySupportedClaimIds.has(claim.id) && claim.kind === "Confirmed fact");
+  const hasConflict = fullTextContradictingSources.length > 0;
+  const supportingOrganisationCount = new Set(fullTextSupportingSources.map(sourceOrganisation)).size;
+  const confidenceLevel = !hasConflict && !hasCausalHypothesis && allFactualClaimsStrong
     ? "High"
-    : fullTextSupportingSources.length || headlineConsensusSources.length
+    : !hasConflict && fullTextSupportingSources.length
     ? "Medium"
     : "Low";
   const metadataOnlyCount = sources.length - fullTextSources.length;
@@ -221,21 +337,23 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
   const confidenceReasons = confidenceLevel === "High"
     ? [
       sourceReadSummary,
-      `${directSupportPublisherCount} independent public source${directSupportPublisherCount === 1 ? " directly corroborates" : "s directly corroborate"} ${highConfidenceClaim?.id}.`,
-      "High confidence applies to that stated factual claim only; wider causes, consequences and predictions still need separate evidence.",
+      `${supportingOrganisationCount} verification-eligible source organisation${supportingOrganisationCount === 1 ? " directly supports" : "s directly support"} every factual claim in the headline.`,
+      "No verification-eligible source contradicted the claim; unrated websites and metadata-only results were excluded.",
     ]
     : confidenceLevel === "Medium"
     ? [
       sourceReadSummary,
-      fullTextSupportingSources.length
-        ? "Direct source text supports a claim, but the support is not yet independently corroborated."
-        : "At least one simple claim has independent headline-level corroboration; article-text verification was unavailable.",
-      "Source pages can still be incomplete, blocked, updated, or contextually limited.",
+      `${supportingOrganisationCount} verification-eligible source organisation${supportingOrganisationCount === 1 ? " supports" : "s support"} at least one claim.`,
+      hasCausalHypothesis ? "A causal part of the headline remains a hypothesis, so the overall result cannot be High." : "Not every factual claim met the primary-or-three-independent-source threshold for High.",
     ]
     : [
       sourceReadSummary,
-      "No claim met the direct-text corroboration threshold.",
-      hasContext ? "Source pages can still be incomplete, blocked, updated, or contextually limited." : "No sufficiently related source title was found.",
+      hasConflict
+        ? `${fullTextContradictingSources.length} verification-eligible source${fullTextContradictingSources.length === 1 ? " directly contradicts" : "s directly contradict"} at least one claim.`
+        : "No verification-eligible source directly supported a claim.",
+      unratedRelatedSources.length
+        ? `${unratedRelatedSources.length} matching unrated web source${unratedRelatedSources.length === 1 ? " was" : "s were"} excluded from support and confidence.`
+        : hasContext ? "Related or ambiguous sources remain context only." : "No sufficiently related source was found.",
     ];
 
   return {
@@ -244,7 +362,9 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     headline,
     detectedLanguage: language,
     updated: `${sources.length ? "Live analysis" : "Live retrieval unavailable"} · ${new Date().toISOString().slice(0, 10)}`,
-    shortFrame: fullTextSources.length
+    shortFrame: hasConflict
+      ? `${fullTextContradictingSources.length} verification-eligible source${fullTextContradictingSources.length === 1 ? " contradicts" : "s contradict"} at least one decomposed claim. The claim remains unverified.`
+      : fullTextSources.length
       ? `${fullTextSources.length} public article page${fullTextSources.length === 1 ? " was" : "s were"} read and matched against decomposed claims. Claims without direct textual corroboration remain unverified.`
       : hasContext
       ? `${sources.length} recent public source${sources.length === 1 ? " was" : "s were"} retrieved and linked at claim level. Their titles add context; article-body verification remains incomplete.`
@@ -252,12 +372,12 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     claims: assessedClaims,
     confirmed,
     uncertain: [
-      warning,
-      "Multiple independent headlines can corroborate a simple factual statement, but only read source text can substantiate its full wording or causal implication.",
-      "No contradiction decision is made without article-level evidence.",
+      hasConflict ? "At least one verification-eligible source directly contradicts a decomposed claim." : warning,
+      "Metadata-only and unrated sources cannot verify a claim, regardless of how many are retrieved.",
+      "Explicit contradiction cues are detected, but subtle framing, satire and complex semantics still require human review.",
     ],
     nodes: [
-      { id: "signal", layer: "Signal", title: confirmed.length ? "Claim corroborated by source text" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: assessedClaims[0]?.kind || "Unverified claim", confidence: confidenceLevel, evidenceIds: contextualIds, uncertainty: confirmed.length ? "Corroboration is limited to the fetched public-source text and does not prove every implication." : warning },
+      { id: "signal", layer: "Signal", title: hasConflict ? "Claim challenged by source text" : confirmed.length ? "Claim corroborated by source text" : "Claim awaits verification", summary: assessedClaims[0]?.text || headline, kind: assessedClaims[0]?.kind || "Unverified claim", confidence: confidenceLevel, evidenceIds: contextualIds, uncertainty: hasConflict ? "The retrieved evidence contains a direct contradiction, so this claim is not confirmed." : confirmed.length ? "Corroboration is limited to verification-eligible fetched text and does not prove every implication." : warning },
       { id: "mechanism", layer: "Mechanism", title: "Possible transmission channel", summary: "Identify the price, incentive, institution or behaviour that would carry the effect forward.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "No article-body evidence has verified this connection." },
       { id: "dependency", layer: "Hidden dependency", title: "Assumption not yet tested", summary: "The implied explanation may depend on timing, geography, market structure or another event omitted from the headline.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "The necessary assumption has not been established." },
       { id: "consequence", layer: "Wider consequence", title: "Consequences remain conditional", summary: "Potential effects should not be presented as outcomes until the mechanism and exposure are supported.", kind: "Causal hypothesis", confidence: "Low", evidenceIds: [], uncertainty: "Magnitude, direction and affected groups remain open." },
@@ -267,7 +387,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     winners: ["No evidence-supported winner identified"],
     losers: ["No evidence-supported loser identified"],
     stressTest: {
-      challengingEvidence: [fullTextSources.length ? "Read source text can corroborate the stated claim, but it may not establish every wider cause or consequence." : "No article-body counter-evidence was available in this retrieval."],
+      challengingEvidence: [hasConflict ? `${fullTextContradictingSources.map((source) => source.id).join(" and ")} directly contradict the claim.` : fullTextSources.length ? "Read source text can corroborate the stated claim, but it may not establish every wider cause or consequence." : "No article-body counter-evidence was available in this retrieval."],
       alternatives: ["A different event may explain the same outcome.", "The headline may be opinion, satire, prediction or correlation rather than a factual causal statement."],
       missingInformation: ["Primary-source confirmation", "Article-body evidence", ...claims.filter((claim) => !linkedClaimIds.has(claim.id)).map((claim) => `Evidence for ${claim.id}`)],
       changeConditions: ["A primary source confirms the event", "Independent reporting agrees after reviewing the same facts", "Evidence directly tests the causal link"],
@@ -278,7 +398,7 @@ export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]
     },
     sources,
     limitations: sources.length
-      ? ["Only public, fetchable source text was read; paywalled, blocked and dynamically rendered pages remain metadata-only.", "Text corroboration verifies the stated claim, not every implied causal link or future consequence.", "Open the linked sources and review their full context before relying on a result."]
+      ? ["Only verification-eligible public source text can affect claim status; unrated sites and metadata-only results remain context.", "The conservative rules detect explicit negation, refutation, hedging and directional conflict, but they are not a universal semantic truth engine.", "Open the linked sources and review their full context before relying on a result."]
       : ["Retrieval was unavailable; no live metadata or evidence-backed causal analysis was produced.", "No curated evidence was substituted for the failed custom request.", "Use Retry or select a clearly labelled pre-verified demonstration."],
   };
 }

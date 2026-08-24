@@ -2,7 +2,7 @@ export type ConfidenceLevel = "High" | "Medium" | "Low";
 export type StatementKind = "Confirmed fact" | "Evidence-supported inference" | "Causal hypothesis" | "Unverified claim";
 export type ClaimCategory = "Event" | "Cause" | "Consequence" | "Causal hypothesis";
 export type EvidenceRole = "Supports" | "Contradicts" | "Adds context" | "Insufficient evidence";
-export type SourceType = "Official / primary" | "Independent reporting" | "Data / analysis";
+export type SourceType = "Official / primary" | "Independent reporting" | "Data / analysis" | "Unrated web source";
 export type NodeLayer = "Signal" | "Mechanism" | "Hidden dependency" | "Wider consequence" | "Relevance";
 
 export type EvidenceSource = {

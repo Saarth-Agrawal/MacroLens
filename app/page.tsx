@@ -79,7 +79,7 @@ export default function Home() {
   const [selectedNodeId, setSelectedNodeId] = useState("signal");
   const [selectedSourceId, setSelectedSourceId] = useState("S1");
   const [pipelineStage, setPipelineStage] = useState<PipelineStage>("Ready");
-  const [pipelineNote, setPipelineNote] = useState("Three pre-verified demo cases are ready. Custom headlines use a conservative live metadata search.");
+  const [pipelineNote, setPipelineNote] = useState("Three pre-verified demo cases are ready. Custom headlines use a conservative live evidence search.");
   const [isAnalysing, setIsAnalysing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [imageName, setImageName] = useState("");
@@ -124,8 +124,7 @@ export default function Home() {
   const requiresOcrConfirmation = Boolean(imageName) && (!ocrConfirmed || !headlinePlausible);
   const retrievalUnavailable = result.mode === "live" && result.sources.length === 0;
   const readSourceCount = result.sources.filter((source) => source.verificationDepth === "full-text").length;
-  const consensusSourceCount = result.sources.filter((source) => source.verificationDepth === "headline-consensus").length;
-  const resultStateLabel = result.mode === "curated" ? "CURATED DEMO · PRE-VERIFIED" : readSourceCount ? "PUBLIC SOURCE TEXT READ" : consensusSourceCount ? "INDEPENDENT HEADLINES CORROBORATE" : result.sources.length ? "METADATA ONLY RETRIEVED" : "LIVE RETRIEVAL UNAVAILABLE";
+  const resultStateLabel = result.mode === "curated" ? "CURATED DEMO · PRE-VERIFIED" : readSourceCount ? "PUBLIC SOURCE TEXT READ" : result.sources.length ? "METADATA ONLY RETRIEVED" : "LIVE RETRIEVAL UNAVAILABLE";
   const hasCurrentResult = normaliseHeadline(headline) === normaliseHeadline(result.headline);
 
   useEffect(() => () => {
@@ -249,14 +248,14 @@ export default function Home() {
       setPipelineNote("Searching and reading public source text with Tavily, then using conservative public-feed fallbacks if needed.");
       const retrieval = await retrieveArticles(cleanHeadline);
       setPipelineStage("Linking evidence");
-      setPipelineNote("Linking related source titles conservatively and marking evidence gaps…");
+      setPipelineNote("Checking source eligibility, support, contradiction and evidence gaps…");
       const liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
       setResult(liveResult);
       setSelectedNodeId(liveResult.nodes[0].id);
       setSelectedSourceId(liveResult.sources[0]?.id || "");
       setPipelineStage(retrieval.articles.length ? "Complete" : "Fallback ready");
       setPipelineNote(retrieval.articles.length
-        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}. Full article verification remains unavailable.`
+        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}. Unrated sites and metadata-only results do not affect confidence.`
         : retrieval.limitation || "No close public evidence was retrieved. The insufficient-evidence safeguard is active.");
     } catch {
       const fallback = buildLiveAnalysis(cleanHeadline, []);
@@ -751,10 +750,10 @@ export default function Home() {
         <div className="method-heading"><span className="section-index">03 / METHOD &amp; TRANSPARENCY</span><h2>AI assists judgement. It does not replace it.</h2><p>The competition build exposes its retrieval depth, evidence role and uncertainty at every important step.</p></div>
         <div className="method-grid">
           <article><span>01</span><h3>Claim extraction</h3><p>Curated cases use reviewed claim sets. Custom headlines use conservative rule-based decomposition; causal connectors become hypotheses.</p></article>
-          <article><span>02</span><h3>Retrieval</h3><p>When Tavily returns public source text, MacroLens matches that text to each claim. METADATA ONLY RETRIEVED means only titles and dates were available. If retrieval fails, one compact RETRIEVAL UNAVAILABLE state replaces the analysis interface.</p></article>
+          <article><span>02</span><h3>Retrieval</h3><p>MacroLens checks read source text for direct support, explicit contradiction and hedging. Unrated websites stay context; METADATA ONLY RETRIEVED means titles or snippets were available and cannot raise confidence.</p></article>
           <article><span>03</span><h3>AI usage</h3><p>Tesseract.js first detects layout with sparse-text segmentation, then rereads only the selected region. Character confidence and headline-selection confidence remain separate.</p></article>
           <article><span>04</span><h3>Privacy</h3><p>Uploaded images are processed in the browser, shown via a temporary object URL and not sent to the MacroLens server.</p></article>
-          <article><span>05</span><h3>Confidence</h3><p>High, Medium or Low reflects source quality, agreement, recency, completeness and conflict—not fabricated precision.</p></article>
+          <article><span>05</span><h3>Confidence</h3><p>High requires complete factual-claim coverage from eligible source text, no eligible contradiction and no unresolved causal claim. Counts alone cannot make confidence High.</p></article>
           <article><span>06</span><h3>Capability boundary</h3><p>CURATED DEMO cases are manually checked. Metadata is not claim verification. Unavailable retrieval generates no causal story, and causal hypotheses are never presented as proven causation.</p></article>
         </div>
         <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily is an optional server-side API integration for public-source retrieval. Re-audit usage, pricing and disclosures after any provider change.</small></div>

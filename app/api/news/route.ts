@@ -1,4 +1,4 @@
-type NewsArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
+export type NewsArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
 
 const readableHosts = new Set([
   "www.reuters.com", "reuters.com", "apnews.com", "www.apnews.com", "www.bbc.com", "bbc.com",
@@ -132,7 +132,29 @@ async function fromGoogleNews(query: string): Promise<NewsArticle[]> {
   return parseRss(await response.text());
 }
 
-type TavilyResult = { title?: string; url?: string; content?: string; raw_content?: string; published_date?: string };
+export type TavilyResult = { title?: string; url?: string; content?: string; raw_content?: string; published_date?: string };
+
+export function articleFromTavilyResult(item: TavilyResult): NewsArticle | undefined {
+  const url = safeWebUrl(item.url || "");
+  const title = (item.title || "").trim().slice(0, 240);
+  if (!url || !title) return undefined;
+  let domain = "Source publisher";
+  try { domain = new URL(url).hostname.replace(/^www\./, ""); } catch { /* validated above */ }
+  const rawContent = (item.raw_content || "").replace(/\s+/g, " ").trim();
+  const searchSnippet = (item.content || "").replace(/\s+/g, " ").trim();
+  const sourceText = rawContent || searchSnippet;
+  return {
+    title,
+    url,
+    publisher: domain,
+    domain,
+    date: normaliseDate(item.published_date || ""),
+    // Tavily `content` is a relevance snippet. Only `raw_content` proves that
+    // enough of the source page was actually read for stance classification.
+    bodyRead: rawContent.length >= 180,
+    excerpt: sourceText.slice(0, 1400) || undefined,
+  };
+}
 
 async function fromTavily(query: string, apiKey: string): Promise<NewsArticle[]> {
   const response = await fetch("https://api.tavily.com/search", {
@@ -153,21 +175,8 @@ async function fromTavily(query: string, apiKey: string): Promise<NewsArticle[]>
   if (!response.ok) throw new Error(`TAVILY_HTTP_${response.status}`);
   const payload = await response.json() as { results?: TavilyResult[] };
   return (payload.results ?? []).slice(0, 8).flatMap((item) => {
-    const url = safeWebUrl(item.url || "");
-    const title = (item.title || "").trim().slice(0, 240);
-    if (!url || !title) return [];
-    let domain = "Source publisher";
-    try { domain = new URL(url).hostname.replace(/^www\./, ""); } catch { /* validated above */ }
-    const sourceText = (item.raw_content || item.content || "").replace(/\s+/g, " ").trim();
-    return [{
-      title,
-      url,
-      publisher: domain,
-      domain,
-      date: normaliseDate(item.published_date || ""),
-      bodyRead: sourceText.length >= 80,
-      excerpt: sourceText.slice(0, 1400) || undefined,
-    }];
+    const article = articleFromTavilyResult(item);
+    return article ? [article] : [];
   });
 }
 

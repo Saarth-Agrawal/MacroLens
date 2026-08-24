@@ -1,6 +1,6 @@
 # MacroLens AI and resource disclosure
 
-Last audited: 22 August 2026
+Last audited: 24 August 2026
 
 ## AI used in the product
 
@@ -50,8 +50,8 @@ Tavily is configured only through a server-side environment variable and may con
 ## Known limitations to disclose
 
 - Tavily may return cleaned public-source text, but it cannot read every page; paywalled, blocked and incomplete sources remain metadata-only.
-- Live sources are labelled “Supports” only when returned public text directly matches a decomposed claim. No causal implication is treated as verified merely because a source mentions the same topic.
-- Full contradiction detection, satire classification and arbitrary-claim verification require article-level evidence and human review.
+- Live sources are labelled “Supports” only when verification-eligible read text makes a direct, non-negated, stance-clear match. Unrated sites, search snippets and title metadata are excluded from support and confidence.
+- The live rules detect explicit negation, refutation cues, hedging and directional conflict. Subtle contradiction, satire and arbitrary semantic verification still require article-level human review.
 - Full-result Hindi and Marathi translation is not complete; curated short previews are machine-generated and labelled.
 - OCR accuracy depends on crop, angle, typography and lighting. Users must confirm the extracted text.
 - The three curated cases are stable demonstration content, not live results.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLiveAnalysis, decomposeHeadline, detectLanguage, makeEvidenceSources } from "../app/lib/analysis.ts";
+import { articleFromTavilyResult } from "../app/api/news/route.ts";
+import { buildLiveAnalysis, decomposeHeadline, detectLanguage, makeEvidenceSources, sourceTypeFor } from "../app/lib/analysis.ts";
 import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlternative, mergeLayoutAndDetail, validateHeadline } from "../app/lib/headlineOcr.ts";
 
 test("detects the three supported headline languages", () => {
@@ -104,21 +105,104 @@ test("uses read public-source text to corroborate a checkable claim", () => {
   ]);
   assert.equal(result.claims[0].kind, "Confirmed fact");
   assert.equal(result.confidence.level, "High");
-  assert.match(result.confidence.reasons[1], /2 independent public sources directly corroborate C1/i);
+  assert.match(result.confidence.reasons[1], /2 verification-eligible source organisations/i);
   assert.equal(result.sources.filter((source) => source.evidenceRole === "Supports").length, 2);
   assert.match(result.shortFrame, /article page/i);
 });
 
-test("uses independent matching headlines as clearly limited corroboration", () => {
+test("keeps matching headline metadata as context rather than support", () => {
   const result = buildLiveAnalysis("$40 trillion and counting: America's debt problem explained", [
-    { title: "U.S. debt hits $40 trillion", url: "https://news.google.com/one", publisher: "Outlet one", domain: "one.example", date: "2026-08-23" },
-    { title: "America's debt crosses $40 trillion", url: "https://news.google.com/two", publisher: "Outlet two", domain: "two.example", date: "2026-08-23" },
-    { title: "National debt tops $40 trillion in the U.S.", url: "https://news.google.com/three", publisher: "Outlet three", domain: "three.example", date: "2026-08-23" },
+    { title: "U.S. debt hits $40 trillion", url: "https://news.google.com/one", publisher: "Reuters", domain: "reuters.com", date: "2026-08-23" },
+    { title: "America's debt crosses $40 trillion", url: "https://news.google.com/two", publisher: "Associated Press", domain: "apnews.com", date: "2026-08-23" },
+    { title: "National debt tops $40 trillion in the U.S.", url: "https://news.google.com/three", publisher: "BBC", domain: "bbc.com", date: "2026-08-23" },
   ]);
-  assert.equal(result.claims[0].kind, "Evidence-supported inference");
-  assert.equal(result.sources.every((source) => source.evidenceRole === "Supports"), true);
-  assert.equal(result.sources.every((source) => source.verificationDepth === "headline-consensus"), true);
-  assert.match(result.confidence.reasons[1], /headline-level corroboration/i);
+  assert.equal(result.claims[0].kind, "Unverified claim");
+  assert.equal(result.sources.every((source) => source.evidenceRole === "Adds context"), true);
+  assert.equal(result.sources.every((source) => source.verificationDepth === undefined), true);
+  assert.equal(result.confidence.level, "Low");
+});
+
+test("labels explicit reliable refutations as contradictions instead of support", () => {
+  const result = buildLiveAnalysis("The Moon is made of cheese", [
+    { title: "Fact check: the Moon is not made of cheese", url: "https://www.reuters.com/fact-check/moon", publisher: "Reuters", domain: "www.reuters.com", date: "2026-08-24", bodyRead: true, excerpt: "The claim that the Moon is made of cheese is false. Scientific evidence shows that it consists of rock." },
+    { title: "No, the Moon is not made of cheese", url: "https://apnews.com/article/moon", publisher: "Associated Press", domain: "apnews.com", date: "2026-08-24", bodyRead: true, excerpt: "The Moon is not made of cheese. This familiar statement is a myth contradicted by lunar samples." },
+  ]);
+  assert.equal(result.sources.every((source) => source.evidenceRole === "Contradicts"), true);
+  assert.equal(result.claims[0].kind, "Unverified claim");
+  assert.equal(result.confirmed.length, 0);
+  assert.equal(result.confidence.level, "Low");
+});
+
+test("excludes unrated matching websites from support and confidence", () => {
+  const result = buildLiveAnalysis("The Moon is made of cheese", [
+    { title: "The Moon is made of cheese", url: "https://viral-one.example/moon", publisher: "Viral One", domain: "viral-one.example", date: "2026-08-24", bodyRead: true, excerpt: "The Moon is made of cheese, according to this website." },
+    { title: "Cheese Moon confirmed", url: "https://viral-two.example/moon", publisher: "Viral Two", domain: "viral-two.example", date: "2026-08-24", bodyRead: true, excerpt: "The Moon is made of cheese and the story is completely true." },
+  ]);
+  assert.equal(result.sources.every((source) => source.sourceType === "Unrated web source"), true);
+  assert.equal(result.sources.every((source) => source.evidenceRole === "Adds context"), true);
+  assert.equal(result.confidence.level, "Low");
+  assert.match(result.confidence.reasons[2], /excluded from support and confidence/i);
+});
+
+test("does not let publisher text or lookalike domains spoof a primary source", () => {
+  assert.equal(sourceTypeFor("imf.org.evil.example"), "Unrated web source");
+  assert.equal(sourceTypeFor("random-blog.example"), "Unrated web source");
+  assert.equal(sourceTypeFor("home.treasury.gov"), "Official / primary");
+});
+
+test("does not treat a Tavily relevance snippet as read article text", () => {
+  const snippetOnly = articleFromTavilyResult({
+    title: "US debt result",
+    url: "https://www.reuters.com/example",
+    content: "This search snippet is deliberately longer than eighty characters and mentions America's debt reaching $40 trillion.",
+  });
+  const rawPage = articleFromTavilyResult({
+    title: "US debt result",
+    url: "https://www.reuters.com/example",
+    content: "Short search snippet",
+    raw_content: "America's debt reached $40 trillion according to the published data. ".repeat(4),
+  });
+  assert.equal(snippetOnly?.bodyRead, false);
+  assert.equal(rawPage?.bodyRead, true);
+});
+
+test("eligible contradiction prevents High even when another source supports", () => {
+  const result = buildLiveAnalysis("$40 trillion and counting: America's debt problem explained", [
+    { title: "US debt reaches $40 trillion", url: "https://home.treasury.gov/debt", publisher: "US Treasury", domain: "home.treasury.gov", date: "2026-08-24", bodyRead: true, excerpt: "America's debt has reached approximately $40 trillion." },
+    { title: "US debt has not reached $40 trillion", url: "https://www.reuters.com/fact-check/debt", publisher: "Reuters", domain: "www.reuters.com", date: "2026-08-24", bodyRead: true, excerpt: "America's debt has not reached $40 trillion; that claim is false." },
+  ]);
+  assert.equal(result.sources[0].evidenceRole, "Supports");
+  assert.equal(result.sources[1].evidenceRole, "Contradicts");
+  assert.equal(result.claims[0].kind, "Unverified claim");
+  assert.equal(result.confidence.level, "Low");
+});
+
+test("treats forecasts as context and detects reversed direction", () => {
+  const forecast = buildLiveAnalysis("$40 trillion and counting: America's debt problem explained", [
+    { title: "US debt is set to hit $40 trillion", url: "https://www.washingtonpost.com/debt", publisher: "The Washington Post", domain: "washingtonpost.com", date: "2026-08-24", bodyRead: true, excerpt: "America's debt is expected to reach $40 trillion later this year." },
+  ]);
+  assert.equal(forecast.sources[0].evidenceRole, "Adds context");
+  assert.equal(forecast.confidence.level, "Low");
+
+  const direction = buildLiveAnalysis("Oil prices rise", [
+    { title: "Oil prices fall", url: "https://www.reuters.com/markets/oil", publisher: "Reuters", domain: "reuters.com", date: "2026-08-24", bodyRead: true, excerpt: "Oil prices fall sharply in the latest session." },
+  ]);
+  assert.equal(direction.sources[0].evidenceRole, "Contradicts");
+  assert.equal(direction.confidence.level, "Low");
+});
+
+test("requires exact numbers and preserves who-did-what relationships", () => {
+  const wrongNumber = buildLiveAnalysis("$40 trillion and counting: America's debt problem explained", [
+    { title: "US debt reaches $41 trillion", url: "https://www.reuters.com/markets/debt", publisher: "Reuters", domain: "reuters.com", date: "2026-08-24", bodyRead: true, excerpt: "America's debt has reached $41 trillion." },
+  ]);
+  assert.notEqual(wrongNumber.sources[0].evidenceRole, "Supports");
+  assert.equal(wrongNumber.confidence.level, "Low");
+
+  const wrongRelationship = buildLiveAnalysis("Elon Musk is CEO of OpenAI", [
+    { title: "OpenAI CEO Sam Altman responds to Elon Musk", url: "https://www.reuters.com/technology/openai", publisher: "Reuters", domain: "reuters.com", date: "2026-08-24", bodyRead: true, excerpt: "Elon Musk criticised OpenAI CEO Sam Altman during the dispute." },
+  ]);
+  assert.notEqual(wrongRelationship.sources[0].evidenceRole, "Supports");
+  assert.equal(wrongRelationship.confidence.level, "Low");
 });
 
 test("ranks the central large Hindi region above surrounding article text", () => {
