@@ -16,8 +16,9 @@ export type EvidenceSource = {
   sourceType: SourceType;
   relatedClaims: string[];
   evidenceRole: EvidenceRole;
-  verificationDepth?: "full-text" | "headline-consensus";
+  verificationDepth?: "full-text" | "headline-consensus" | "curated-review";
   excerpt?: string;
+  excerptKind?: "verbatim" | "source-title";
   translationDisclosure?: string;
   limitations?: string[];
   note: string;
@@ -248,6 +249,9 @@ const coreDemoCases: CoreAnalysisResult[] = [
         sourceType: "Official / primary",
         relatedClaims: ["C1", "C2"],
         evidenceRole: "Supports",
+        verificationDepth: "curated-review",
+        excerpt: "Policy Repo Rate: 5.25%.",
+        excerptKind: "verbatim",
         note: "The official resolution records a unanimous hold at 5.25% and continuation of the neutral stance.",
       },
       {
@@ -259,6 +263,9 @@ const coreDemoCases: CoreAnalysisResult[] = [
         sourceType: "Independent reporting",
         relatedClaims: ["C1", "C2", "C3"],
         evidenceRole: "Supports",
+        verificationDepth: "curated-review",
+        excerpt: "India's central bank holds rates, awaits clearer inflation signal before acting",
+        excerptKind: "source-title",
         note: "Reports the unanimous hold, neutral stance and the policy trade-off around the inflation path.",
       },
       {
@@ -270,6 +277,9 @@ const coreDemoCases: CoreAnalysisResult[] = [
         sourceType: "Independent reporting",
         relatedClaims: ["C3"],
         evidenceRole: "Adds context",
+        verificationDepth: "curated-review",
+        excerpt: "India rate panel signals impending hikes, eyes inflation path to gauge timing",
+        excerptKind: "source-title",
         note: "Minutes-based reporting challenges any interpretation of ‘neutral’ as a permanent pause.",
       },
       {
@@ -281,6 +291,9 @@ const coreDemoCases: CoreAnalysisResult[] = [
         sourceType: "Data / analysis",
         relatedClaims: ["C4"],
         evidenceRole: "Insufficient evidence",
+        verificationDepth: "curated-review",
+        excerpt: "Database on Indian Economy",
+        excerptKind: "source-title",
         note: "Useful for policy and banking series, but it cannot verify an individual borrower’s EMI from the headline alone.",
       },
     ],
@@ -323,10 +336,10 @@ const coreDemoCases: CoreAnalysisResult[] = [
     },
     confidence: { level: "High", reasons: ["IMF, World Bank and independent reporting agree on the rerouting and trade disruption.", "The route mechanism is directly observable.", "Consumer-price consequences remain conditional and are labelled as hypotheses."] },
     sources: [
-      { id: "S1", title: "Red Sea Attacks Disrupt Global Trade", publisher: "International Monetary Fund", date: "2024-03-07", url: "https://www.imf.org/en/blogs/articles/2024/03/07/red-sea-attacks-disrupt-global-trade", sourceType: "Official / primary", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", note: "Records a 50% year-on-year fall in Suez Canal trade in the first two months of 2024 and increased Cape traffic." },
-      { id: "S2", title: "Will a prolonged rerouting of ships from Suez trigger a new supply chain crisis?", publisher: "World Bank", date: "2024-01-19", url: "https://blogs.worldbank.org/en/trade/will-prolonged-rerouting-ships-suez-trigger-new-supply-chain-crisis", sourceType: "Data / analysis", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", note: "Documents the 3,000–3,500 nautical-mile detour, added sailing time and shipping capacity absorbed by rerouting." },
-      { id: "S3", title: "Freight through Suez Canal down 45% since Houthi attacks, UNCTAD says", publisher: "Reuters", date: "2024-01-26", url: "https://www.reuters.com/world/middle-east/freight-through-suez-canal-down-45-since-houthi-attacks-unctad-2024-01-26/", sourceType: "Independent reporting", relatedClaims: ["C1", "C3"], evidenceRole: "Supports", note: "Independent reporting on UNCTAD’s evidence and the cost implications of rerouting." },
-      { id: "S4", title: "Shipping disruptions in the Red Sea: Global ripples", publisher: "Federal Reserve Bank of St. Louis", date: "2024-02-15", url: "https://www.stlouisfed.org/on-the-economy/2024/feb/shipping-disruptions-red-sea-ripples-globe", sourceType: "Data / analysis", relatedClaims: ["C3", "C4"], evidenceRole: "Adds context", note: "Explains cost transmission while leaving the magnitude of final consumer-price pass-through open." },
+      { id: "S1", title: "Red Sea Attacks Disrupt Global Trade", publisher: "International Monetary Fund", date: "2024-03-07", url: "https://www.imf.org/en/blogs/articles/2024/03/07/red-sea-attacks-disrupt-global-trade", sourceType: "Official / primary", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", verificationDepth: "curated-review", excerpt: "Suez Canal trade dropped by 50 percent from a year earlier.", excerptKind: "verbatim", note: "Records a 50% year-on-year fall in Suez Canal trade in the first two months of 2024 and increased Cape traffic." },
+      { id: "S2", title: "Will a prolonged rerouting of ships from Suez trigger a new supply chain crisis?", publisher: "World Bank", date: "2024-01-19", url: "https://blogs.worldbank.org/en/trade/will-prolonged-rerouting-ships-suez-trigger-new-supply-chain-crisis", sourceType: "Data / analysis", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", verificationDepth: "curated-review", excerpt: "adding 3,000 to 3,500 nautical miles (5,500 to 6,500 km) and seven to 10 days", excerptKind: "verbatim", note: "Documents the 3,000–3,500 nautical-mile detour, added sailing time and shipping capacity absorbed by rerouting." },
+      { id: "S3", title: "Freight through Suez Canal down 45% since Houthi attacks, UNCTAD says", publisher: "Reuters", date: "2024-01-26", url: "https://www.reuters.com/world/middle-east/freight-through-suez-canal-down-45-since-houthi-attacks-unctad-2024-01-26/", sourceType: "Independent reporting", relatedClaims: ["C1", "C3"], evidenceRole: "Supports", verificationDepth: "curated-review", excerpt: "Freight through Suez Canal down 45% since Houthi attacks, UNCTAD says", excerptKind: "source-title", note: "Independent reporting on UNCTAD’s evidence and the cost implications of rerouting." },
+      { id: "S4", title: "Shipping disruptions in the Red Sea: Global ripples", publisher: "Federal Reserve Bank of St. Louis", date: "2024-02-15", url: "https://www.stlouisfed.org/on-the-economy/2024/feb/shipping-disruptions-red-sea-ripples-globe", sourceType: "Data / analysis", relatedClaims: ["C3", "C4"], evidenceRole: "Adds context", verificationDepth: "curated-review", excerpt: "shipping companies have altered their routes to avoid the Suez Canal and the Red Sea", excerptKind: "verbatim", note: "Explains cost transmission while leaving the magnitude of final consumer-price pass-through open." },
     ],
     limitations: ["This is a pre-verified historical demonstration, not a statement that conditions are unchanged today.", "Trade-cost evidence is stronger than the claim of broad consumer-price inflation.", "India-specific impact remains a scenario until sector data is added."],
   },
@@ -367,10 +380,10 @@ const coreDemoCases: CoreAnalysisResult[] = [
     },
     confidence: { level: "High", reasons: ["A primary IEA report directly states the projection.", "Independent reporting confirms the scenario and its caveats.", "The interface labels the 2030 value as a projection rather than a fact about the future."] },
     sources: [
-      { id: "S1", title: "Energy demand from AI", publisher: "International Energy Agency", date: "2025-04-10", url: "https://www.iea.org/reports/energy-and-ai/energy-demand-from-ai", sourceType: "Official / primary", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", note: "IEA base case projects about 945 TWh of data-centre electricity demand in 2030, just under 3% of global electricity use." },
-      { id: "S2", title: "Energy and AI: Executive summary", publisher: "International Energy Agency", date: "2025-04-10", url: "https://www.iea.org/reports/energy-and-ai/executive-summary", sourceType: "Data / analysis", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", note: "Summarises the projection and identifies AI as the most important growth driver." },
-      { id: "S3", title: "Data centre electricity use surged in 2025, even with tightening bottlenecks", publisher: "International Energy Agency", date: "2026-04-16", url: "https://www.iea.org/news/data-centre-electricity-use-surged-in-2025-even-with-tightening-bottlenecks-driving-a-scramble-for-solutions", sourceType: "Official / primary", relatedClaims: ["C2", "C3"], evidenceRole: "Adds context", note: "Updates the outlook and notes rapid efficiency improvement alongside rising AI use and bottlenecks." },
-      { id: "S4", title: "Global trade war may produce headwinds for nascent AI sector, IEA says", publisher: "Reuters", date: "2025-04-10", url: "https://www.reuters.com/technology/artificial-intelligence/global-trade-war-may-produce-headwinds-nascent-ai-sector-iea-says-2025-04-10/", sourceType: "Independent reporting", relatedClaims: ["C3", "C4"], evidenceRole: "Adds context", note: "Reports the IEA’s lower headwind scenario and project delays, challenging any claim that the base-case outcome is certain." },
+      { id: "S1", title: "Energy demand from AI", publisher: "International Energy Agency", date: "2025-04-10", url: "https://www.iea.org/reports/energy-and-ai/energy-demand-from-ai", sourceType: "Official / primary", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", verificationDepth: "curated-review", excerpt: "global electricity consumption for data centres is projected to double to reach around 945 TWh by 2030 in the Base Case", excerptKind: "verbatim", note: "IEA base case projects about 945 TWh of data-centre electricity demand in 2030, just under 3% of global electricity use." },
+      { id: "S2", title: "Energy and AI: Executive summary", publisher: "International Energy Agency", date: "2025-04-10", url: "https://www.iea.org/reports/energy-and-ai/executive-summary", sourceType: "Data / analysis", relatedClaims: ["C1", "C2"], evidenceRole: "Supports", verificationDepth: "curated-review", excerpt: "Data centre electricity consumption is set to more than double to around 945 TWh by 2030.", excerptKind: "verbatim", note: "Summarises the projection and identifies AI as the most important growth driver." },
+      { id: "S3", title: "Data centre electricity use surged in 2025, even with tightening bottlenecks", publisher: "International Energy Agency", date: "2026-04-16", url: "https://www.iea.org/news/data-centre-electricity-use-surged-in-2025-even-with-tightening-bottlenecks-driving-a-scramble-for-solutions", sourceType: "Official / primary", relatedClaims: ["C2", "C3"], evidenceRole: "Adds context", verificationDepth: "curated-review", excerpt: "power consumption per AI task is declining rapidly, with efficiency improving at a rate unprecedented in energy history", excerptKind: "verbatim", note: "Updates the outlook and notes rapid efficiency improvement alongside rising AI use and bottlenecks." },
+      { id: "S4", title: "Global trade war may produce headwinds for nascent AI sector, IEA says", publisher: "Reuters", date: "2025-04-10", url: "https://www.reuters.com/technology/artificial-intelligence/global-trade-war-may-produce-headwinds-nascent-ai-sector-iea-says-2025-04-10/", sourceType: "Independent reporting", relatedClaims: ["C3", "C4"], evidenceRole: "Adds context", verificationDepth: "curated-review", excerpt: "Global trade war may produce headwinds for nascent AI sector, IEA says", excerptKind: "source-title", note: "Reports the IEA’s lower headwind scenario and project delays, challenging any claim that the base-case outcome is certain." },
     ],
     limitations: ["This case explains a published projection; it does not certify a future outcome.", "The global evidence does not prove uniform local grid effects.", "India relevance is a transparent hypothesis pending India-specific project and energy data."],
   },

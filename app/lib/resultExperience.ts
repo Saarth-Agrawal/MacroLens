@@ -442,14 +442,24 @@ export function sourceInspectorModel(source: EvidenceSource, mode: CoreAnalysisR
     ? "Article text read"
     : source.verificationDepth === "headline-consensus"
     ? "Headline consensus only"
+    : source.verificationDepth === "curated-review"
+    ? "Curated source review"
     : mode === "curated"
     ? "Curated review · retrieval depth not stored"
     : "Metadata only";
   const excerpt = source.excerpt?.trim() || null;
+  const excerptLabel = source.excerptKind === "source-title"
+    ? "Relevant source-title text"
+    : "Relevant source excerpt";
   return {
     retrievalDepthLabel,
     excerpt,
-    excerptAvailabilityLabel: excerpt ? "Relevant excerpt available" : "No excerpt available; no verbatim text is stored.",
+    excerptLabel,
+    excerptAvailabilityLabel: excerpt
+      ? source.excerptKind === "source-title"
+        ? "Article body unavailable; showing attributable source-title text."
+        : "Relevant verbatim excerpt available."
+      : "No excerpt available; no verbatim text is stored.",
     translationDisclosure: source.translationDisclosure || "No translation record is stored for this source. Open the original before relying on translated wording.",
   };
 }

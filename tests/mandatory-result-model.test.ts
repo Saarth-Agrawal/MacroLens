@@ -224,6 +224,21 @@ test("P0 source inspector distinguishes source excerpts from editorial notes", (
   assert.equal(fullTextView.excerpt, sparseLive.sources[0].excerpt);
 });
 
+test("P0 every curated source stores review depth and attributable source text", () => {
+  for (const result of demoCases) {
+    for (const source of result.sources) {
+      const view = sourceInspectorModel(source, result.mode);
+      assert.equal(view.retrievalDepthLabel, "Curated source review", `${result.id}/${source.id} has no curated review depth`);
+      assert.ok(view.excerpt, `${result.id}/${source.id} has no attributable source text`);
+      assert.match(view.excerptLabel, /source excerpt|source-title text/i);
+      if (source.excerptKind === "source-title") {
+        assert.equal(view.excerpt, source.title);
+        assert.match(view.excerptAvailabilityLabel, /article body unavailable/i);
+      }
+    }
+  }
+});
+
 test("P0 language disclosure never claims a translation that did not occur", () => {
   const unavailable = explanationPresentation(sparseLive, "Hindi");
   assert.equal(unavailable.text, sparseLive.bottomLine.explanation);

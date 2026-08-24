@@ -310,7 +310,7 @@ function SourceInspector({ source, result, onOpen }: { source: EvidenceSource; r
   const presentation = sourceInspectorModel(source, result.mode);
   return <div className="ml-inspector-content">
     <div className="ml-inspector-facts"><div><span>Publisher</span><p>{source.publisher}</p></div><div><span>Date</span><p>{source.date}</p></div><div><span>Source tier</span><p>{source.sourceType}</p></div><div><span>Retrieval depth</span><p>{presentation.retrievalDepthLabel}</p></div></div>
-    <section><span>Source excerpt</span>{presentation.excerpt ? <blockquote>{presentation.excerpt}</blockquote> : <p>{presentation.excerptAvailabilityLabel}</p>}</section>
+    <section><span>{presentation.excerptLabel}</span>{presentation.excerpt ? <><blockquote>{presentation.excerpt}</blockquote>{source.excerptKind === "source-title" && <p>{presentation.excerptAvailabilityLabel}</p>}</> : <p>{presentation.excerptAvailabilityLabel}</p>}</section>
     <section><span>Linked claim</span>{source.relatedClaims.length ? <div className="ml-inspector-links">{source.relatedClaims.map((id) => <button key={id} type="button" onClick={() => onOpen({ kind: "claim", id })}>{id}</button>)}</div> : <p>No claim is directly linked.</p>}</section>
     <section><span>Evidence role</span><p><b className={`ml-role-pill ${roleClass(source.evidenceRole)}`}>{source.evidenceRole}</b></p></section>
     <section><span>Why this source matters</span><p>{source.note}</p></section>
