@@ -2,15 +2,6 @@ import { buildEconomicLensQuery } from "../../lib/economicLens.ts";
 
 export type NewsArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
 
-const readableHosts = new Set([
-  "www.reuters.com", "reuters.com", "apnews.com", "www.apnews.com", "www.bbc.com", "bbc.com",
-  "www.cnbc.com", "cnbc.com", "www.theguardian.com", "theguardian.com", "www.npr.org", "npr.org",
-  "www.ndtv.com", "ndtv.com", "www.axios.com", "axios.com", "timesofindia.indiatimes.com", "www.aljazeera.com", "aljazeera.com",
-  "www.cbsnews.com", "cbsnews.com", "www.bloomberg.com", "bloomberg.com", "www.pbs.org", "pbs.org",
-  "home.treasury.gov", "fiscaldata.treasury.gov", "www.imf.org", "imf.org", "www.worldbank.org", "worldbank.org",
-  "www.iea.org", "iea.org", "www.oecd.org", "oecd.org", "www.un.org", "un.org", "unctad.org", "www.unctad.org",
-]);
-
 const responseHeaders = {
   "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
   "X-Content-Type-Options": "nosniff",
@@ -41,47 +32,6 @@ function normaliseDate(value: string) {
   return Number.isNaN(parsed) ? "Date unavailable" : new Date(parsed).toISOString().slice(0, 10);
 }
 
-function isReadablePublicUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && readableHosts.has(url.hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-function htmlToText(html: string) {
-  return decodeXml(html
-    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " "));
-}
-
-async function readPublicArticle(article: NewsArticle): Promise<NewsArticle> {
-  if (article.bodyRead) return article;
-  if (!isReadablePublicUrl(article.url)) return article;
-  try {
-    const response = await fetch(article.url, {
-      headers: { "Accept": "text/html,application/xhtml+xml;q=0.9", "User-Agent": "Mozilla/5.0 (compatible; MacroLens/4.0; public-source verification prototype)" },
-      redirect: "manual",
-      signal: AbortSignal.timeout(6500),
-    });
-    const contentType = response.headers.get("content-type") || "";
-    const length = Number(response.headers.get("content-length") || 0);
-    if (!response.ok || !/text\/html|application\/xhtml\+xml/i.test(contentType) || length > 1_200_000) return article;
-    const text = htmlToText((await response.text()).slice(0, 1_200_000));
-    if (text.length < 180) return article;
-    return { ...article, bodyRead: true, excerpt: text.slice(0, 1400) };
-  } catch {
-    return article;
-  }
-}
-
-async function enrichWithReadableText(articles: NewsArticle[]) {
-  const readable = await Promise.all(articles.slice(0, 5).map(readPublicArticle));
-  return [...readable, ...articles.slice(5)];
-}
-
 function parseRss(xml: string): NewsArticle[] {
   return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].slice(0, 8).map((match) => {
     const item = match[1];
@@ -106,7 +56,7 @@ async function fromGdelt(query: string): Promise<NewsArticle[]> {
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=8&format=json&sort=datedesc&timespan=1month`;
   const response = await fetch(url, {
     headers: { "Accept": "application/json", "User-Agent": "MacroLens-competition-prototype/4.0" },
-    signal: AbortSignal.timeout(4500),
+    signal: AbortSignal.timeout(3000),
   });
   if (!response.ok) throw new Error(`GDELT_HTTP_${response.status}`);
   const payload = await response.json() as { articles?: Array<{ title?: string; url?: string; domain?: string; seendate?: string }> };
@@ -128,7 +78,7 @@ async function fromGoogleNews(query: string): Promise<NewsArticle[]> {
       "User-Agent": "Mozilla/5.0 (compatible; MacroLens/4.0; school competition research prototype)",
     },
     redirect: "follow",
-    signal: AbortSignal.timeout(6500),
+    signal: AbortSignal.timeout(3000),
   });
   if (!response.ok) throw new Error(`GOOGLE_NEWS_HTTP_${response.status}`);
   return parseRss(await response.text());
@@ -166,17 +116,19 @@ async function fromTavily(query: string, apiKey: string): Promise<NewsArticle[]>
       query,
       topic: "general",
       search_depth: "basic",
-      chunks_per_source: 3,
-      max_results: 8,
+      chunks_per_source: 2,
+      // Two full-text results consistently complete inside the hosted worker's
+      // request window while still allowing independent-source corroboration.
+      max_results: 2,
       include_answer: false,
       include_raw_content: "text",
       include_images: false,
     }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(3000),
   });
   if (!response.ok) throw new Error(`TAVILY_HTTP_${response.status}`);
   const payload = await response.json() as { results?: TavilyResult[] };
-  return (payload.results ?? []).slice(0, 8).flatMap((item) => {
+  return (payload.results ?? []).slice(0, 2).flatMap((item) => {
     const article = articleFromTavilyResult(item);
     return article ? [article] : [];
   });
@@ -200,11 +152,44 @@ export async function POST(request: Request) {
   if (!query) return Response.json({ articles: [], provider: "none", limitation: "A search query is required." }, { status: 400, headers: responseHeaders });
 
   const tavilyKey = process.env.TAVILY_API_KEY;
-  // Tavily returns the clean text it read from real source pages. Public feeds
-  // remain a no-key fallback when that service is not configured or unavailable.
-  const providers = tavilyKey
-    ? [["Tavily public-source search", "tavily", (value: string) => fromTavily(value, tavilyKey)], ["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const
-    : [["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const;
+  // Tavily returns the clean text it read from real source pages. When it is
+  // configured, return that result immediately instead of waiting for slower
+  // metadata-only feeds; the hosted worker has a short request window.
+  if (tavilyKey) {
+    try {
+      const articles = await fromTavily(query, tavilyKey);
+      if (articles.length) {
+        const hasPublicArticleText = articles.some((article) => article.bodyRead);
+        return Response.json({
+          articles,
+          provider: "Tavily public-source search",
+          retrievalStatus: "live",
+          evidenceDepth: hasPublicArticleText ? "public article text plus metadata" : "headline metadata only",
+          diagnostics: { tavily: "success" },
+        }, { headers: { ...responseHeaders, "X-MacroLens-Source-Depth": hasPublicArticleText ? "public-article-text" : "headline-metadata-only" } });
+      }
+      return Response.json({
+        articles: [],
+        provider: "offline",
+        retrievalStatus: "unavailable",
+        evidenceDepth: "none",
+        diagnostics: { tavily: "empty" },
+        limitation: "LIVE RETRIEVAL UNAVAILABLE. Tavily did not return a usable public source for this headline. No curated evidence has been substituted.",
+      }, { headers: responseHeaders });
+    } catch (error) {
+      return Response.json({
+        articles: [],
+        provider: "offline",
+        retrievalStatus: "unavailable",
+        evidenceDepth: "none",
+        diagnostics: { tavily: diagnostic(error) },
+        limitation: "LIVE RETRIEVAL UNAVAILABLE. Tavily did not return a usable public source for this headline. No curated evidence has been substituted.",
+      }, { headers: responseHeaders });
+    }
+  }
+
+  // Google News and GDELT remain an honest no-key fallback for local builds.
+  const providers = [["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const;
   const settled = await Promise.allSettled(providers.map(([, , load]) => load(query)));
   const diagnostics: Record<string, string> = {};
   for (const [index, outcome] of settled.entries()) {
@@ -212,7 +197,7 @@ export async function POST(request: Request) {
     if (outcome.status === "fulfilled") {
       diagnostics[diagnosticKey] = outcome.value.length ? "success" : "empty";
       if (outcome.value.length) {
-        const articles = await enrichWithReadableText(outcome.value);
+        const articles = outcome.value;
         return Response.json({ articles, provider, retrievalStatus: "live", evidenceDepth: articles.some((article) => article.bodyRead) ? "public article text plus metadata" : "headline metadata only", diagnostics }, { headers: responseHeaders });
       }
     } else {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { articleFromTavilyResult } from "../app/api/news/route.ts";
+import { POST as retrieveNews, articleFromTavilyResult } from "../app/api/news/route.ts";
 import { buildLiveAnalysis, decomposeHeadline, detectLanguage, makeEvidenceSources, sourceTypeFor } from "../app/lib/analysis.ts";
 import { buildEconomicLensQuery } from "../app/lib/economicLens.ts";
 import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlternative, mergeLayoutAndDetail, validateHeadline } from "../app/lib/headlineOcr.ts";
@@ -215,6 +215,66 @@ test("does not treat a Tavily relevance snippet as read article text", () => {
   });
   assert.equal(snippetOnly?.bodyRead, false);
   assert.equal(rawPage?.bodyRead, true);
+});
+
+test("configured Tavily returns two full-text sources without waiting for fallback feeds", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.TAVILY_API_KEY;
+  const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  process.env.TAVILY_API_KEY = "tvly-test-credential-that-is-not-a-real-secret";
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+    calls.push({ url, body });
+    return Response.json({
+      results: [
+        {
+          title: "India inflation outlook changes after the latest policy meeting",
+          url: "https://www.reuters.com/world/india/policy-outlook",
+          published_date: "2026-08-24",
+          content: "A short relevance snippet.",
+          raw_content: "India's latest monetary-policy meeting changed the inflation outlook while the central bank assessed food and fuel pressures. ".repeat(3),
+        },
+        {
+          title: "Monetary policy statement and inflation outlook",
+          url: "https://www.rbi.org.in/Scripts/PolicyStatement.aspx",
+          published_date: "2026-08-24",
+          content: "A second relevance snippet.",
+          raw_content: "The policy statement records the committee's inflation assessment, policy decision and conditional outlook for prices and growth. ".repeat(3),
+        },
+      ],
+    });
+  };
+
+  try {
+    const response = await retrieveNews(new Request("http://localhost/api/news", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "India inflation outlook changes after the latest monetary policy meeting" }),
+    }));
+    const payload = await response.json() as {
+      articles: Array<{ bodyRead?: boolean }>;
+      provider: string;
+      evidenceDepth: string;
+      diagnostics: Record<string, string>;
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.provider, "Tavily public-source search");
+    assert.equal(payload.articles.length, 2);
+    assert.equal(payload.articles.every((article) => article.bodyRead), true);
+    assert.equal(payload.evidenceDepth, "public article text plus metadata");
+    assert.equal(response.headers.get("X-MacroLens-Source-Depth"), "public-article-text");
+    assert.deepEqual(payload.diagnostics, { tavily: "success" });
+    assert.equal(calls.length, 1, "Configured Tavily should not wait for Google News or GDELT");
+    assert.equal(calls[0].url, "https://api.tavily.com/search");
+    assert.equal(calls[0].body?.max_results, 2);
+    assert.equal(calls[0].body?.include_raw_content, "text");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.TAVILY_API_KEY;
+    else process.env.TAVILY_API_KEY = originalKey;
+  }
 });
 
 test("eligible contradiction prevents High even when another source supports", () => {
