@@ -69,6 +69,7 @@ export type CoreAnalysisResult = {
   confidence: { level: ConfidenceLevel; reasons: string[] };
   sources: EvidenceSource[];
   limitations: string[];
+  aiAnalysis?: GeminiAnalysis;
 };
 
 export type EvidenceStatus = "Confirmed" | "Contested" | "Insufficient";
@@ -119,6 +120,15 @@ export type CouncilSynthesis = {
   areasOfDisagreement: CouncilDisagreement[];
   unresolvedQuestions: string[];
   evidenceNeeded: string[];
+};
+
+export type GeminiAnalysis = {
+  model: "gemini-3.5-flash-lite";
+  framing: string;
+  nodes: CausalNode[];
+  perspectives: CouncilPerspective[];
+  synthesis: CouncilSynthesis;
+  disclosure: string;
 };
 
 export type ProfileRelevance = {

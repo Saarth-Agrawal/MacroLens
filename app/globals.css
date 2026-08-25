@@ -1457,6 +1457,7 @@ body::before { animation: grainDrift 26s linear infinite; }
 .ml-evidence-boundary { padding: 22px; background: #e5e0d5; border: 1px solid #aaa394; }
 .ml-evidence-boundary strong { color: #26313b; }
 .ml-evidence-boundary p { margin: 8px 0 0; color: #5d605f; line-height: 1.6; }
+.ml-ai-disclosure { margin: 14px 0 0; padding: 12px 14px; color: #4e565d; background: #e8e2d5; border-left: 4px solid #1d4368; font-size: 11px; line-height: 1.6; }
 
 .ml-synthesis-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .ml-synthesis-grid article { min-height: 180px; padding: 20px; background: #f8f3e8; border: 1px solid #b8b0a1; }

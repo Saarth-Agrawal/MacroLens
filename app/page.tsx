@@ -3,6 +3,7 @@ import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, use
 import ResultExperience from "./components/ResultExperience";
 import { demoCases, findDemoCase, type AnalysisResult, type UserProfile } from "./data/demoCases";
 import { buildLiveAnalysis, detectLanguage, type RetrievedArticle } from "./lib/analysis";
+import { applyGeminiAnalysis } from "./lib/geminiAnalysis";
 import { userProfiles } from "./lib/resultExperience";
 import { cropCanvas, prepareDocumentImage } from "./lib/documentImage";
 import { buildEconomicLensQuery } from "./lib/economicLens";
@@ -291,12 +292,27 @@ export default function Home() {
       if (analysisRunRef.current !== runId) return;
       setPipelineStage("Linking evidence");
       setPipelineNote("Checking source eligibility, support, contradiction and evidence gaps…");
-      const liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
+      let liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
+      const readableSources = liveResult.sources.filter((source) => source.verificationDepth === "full-text" && source.excerpt);
+      if (readableSources.length) {
+        setPipelineNote("Gemini 3.5 Flash-Lite is challenging the evidence through five structured Council perspectives…");
+        try {
+          const response = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: retrievalController.signal,
+            body: JSON.stringify({ headline: cleanHeadline, language: liveResult.detectedLanguage, profile: selectedProfile, claims: liveResult.claims, sources: readableSources }),
+          });
+          const payload = await response.json() as { available?: boolean; analysis?: NonNullable<AnalysisResult["aiAnalysis"]> };
+          if (analysisRunRef.current !== runId) return;
+          if (response.ok && payload.available && payload.analysis) liveResult = applyGeminiAnalysis(liveResult, payload.analysis);
+        } catch { /* preserve the deterministic evidence result */ }
+      }
       setResult(liveResult);
       setResultIsFresh(true);
       setPipelineStage(retrieval.articles.length ? "Complete" : "Fallback ready");
       setPipelineNote(retrieval.articles.length
-        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}. Unrated sites and metadata-only results do not affect confidence.`
+        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}.${liveResult.aiAnalysis ? " Gemini 3.5 Flash-Lite generated the five-role Council analysis." : " Evidence-only fallback used."} Unrated sites and metadata-only results do not affect confidence.`
         : retrieval.limitation || "No close public evidence was retrieved. The insufficient-evidence safeguard is active.");
     } catch {
       if (analysisRunRef.current !== runId) return;
@@ -761,12 +777,12 @@ export default function Home() {
         <div className="method-grid reveal">
           <article><span>01</span><h3>Scope and claim extraction</h3><p>Any custom headline is accepted. Claim extraction preserves the headline; retrieval adds a business-and-economics lens. Curated cases use reviewed claim sets.</p></article>
           <article><span>02</span><h3>Retrieval</h3><p>MacroLens checks read source text for direct support, explicit contradiction and hedging. Unrated websites stay context; METADATA ONLY RETRIEVED means titles or snippets were available and cannot raise confidence.</p></article>
-          <article><span>03</span><h3>AI usage</h3><p>Tesseract.js first detects layout with sparse-text segmentation, then rereads only the selected region. Character confidence and headline-selection confidence remain separate.</p></article>
+          <article><span>03</span><h3>AI usage</h3><p>Tesseract.js reads selected headline regions. For custom headlines with readable source text, Gemini 3.5 Flash-Lite generates five structured Council perspectives in one call. It cannot change rule-controlled claim status, citations or confidence.</p></article>
           <article><span>04</span><h3>Privacy</h3><p>Uploaded images are processed in the browser, shown via a temporary object URL and not sent to the MacroLens server.</p></article>
           <article><span>05</span><h3>Confidence</h3><p>High requires complete factual-claim coverage from eligible source text, no eligible contradiction and no unresolved causal claim. Counts alone cannot make confidence High.</p></article>
           <article><span>06</span><h3>Capability boundary</h3><p>Every headline is accepted, but MacroLens reports only evidence-linked business and economic pathways. If none is supported, it says so. Metadata is not claim verification.</p></article>
         </div>
-        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily is an optional server-side API integration for public-source retrieval. Re-audit usage, pricing and disclosures after any provider change.</small></div>
+        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · Gemini 3.5 Flash-Lite · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily retrieves public-source text. Gemini generates structured analysis only when readable excerpts are available; one call produces all five Council roles, which are not independent agents.</small></div>
       </section>
 
       <footer className="site-footer"><div><span className="brand-mark">ML</span><p><strong>MacroLens</strong><small>See beyond the story. Understand the system.</small></p></div><span>HKU AI+ Challenge · Competition build under review · August 2026</span></footer>

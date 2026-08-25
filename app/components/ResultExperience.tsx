@@ -66,7 +66,9 @@ export default function ResultExperience({ result, explanationLanguage, onExplan
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const displayResult = useMemo(() => withUserProfile(result, profile), [profile, result]);
-  const { bottomLine, visualStory, councilSynthesis } = displayResult;
+  const { bottomLine, visualStory } = displayResult;
+  const councilPerspectives = displayResult.aiAnalysis?.perspectives ?? displayResult.councilPerspectives;
+  const councilSynthesis = displayResult.aiAnalysis?.synthesis ?? displayResult.councilSynthesis;
 
   useEffect(() => {
     if (!inspectorTarget) return;
@@ -228,11 +230,11 @@ export default function ResultExperience({ result, explanationLanguage, onExplan
     </article>
 
     {deepDiveOpen && <section className="ml-deep-dive" aria-label="Deep Dive">
-      <header className="ml-deep-dive-head"><span>LEVEL 2 · DIVE DEEPER</span><h2>How the conclusion was challenged</h2><p>Five independent roles inspect different failure modes. This is a structured debate, not a vote, and agreement is not proof.</p></header>
+      <header className="ml-deep-dive-head"><span>LEVEL 2 · DIVE DEEPER</span><h2>How the conclusion was challenged</h2><p>{displayResult.aiAnalysis ? "Gemini generated five distinct structured perspectives in one call. They are not independent agents, and agreement is not proof." : "Five rule-based review roles inspect different failure modes. This is a structured review, not a vote, and agreement is not proof."}</p></header>
 
       <section className="ml-council-section" aria-labelledby="council-title">
-        <div className="ml-subsection-head"><div><span>01</span><h3 id="council-title">Evidence Council</h3></div><p>Each role has its own purpose, evidence trail, uncertainty and challenge.</p></div>
-        {displayResult.councilPerspectives.length ? <div className="ml-council-grid">{displayResult.councilPerspectives.map((perspective, index) => <details key={perspective.role} open={index === 0}>
+        <div className="ml-subsection-head"><div><span>01</span><h3 id="council-title">Evidence Council</h3></div><p>{displayResult.aiAnalysis ? "Gemini-generated from the displayed source excerpts · one model call" : "Rule-based review using the current evidence ledger"}</p></div>
+        {councilPerspectives.length ? <div className="ml-council-grid">{councilPerspectives.map((perspective, index) => <details key={perspective.role} open={index === 0}>
           <summary><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{perspective.role}</strong><small>{perspective.purpose}</small></div><i aria-hidden="true">+</i></summary>
           <div className="ml-council-body">
             <div><span>Position</span><p>{perspective.position}</p></div>
@@ -243,7 +245,8 @@ export default function ResultExperience({ result, explanationLanguage, onExplan
             <blockquote>{perspective.questionForUser}</blockquote>
             <small className="ml-confidence-category">Calibrated category: {perspective.confidenceCategory}</small>
           </div>
-        </details>)}</div> : <div className="ml-evidence-boundary"><strong>No artificial Council debate was generated.</strong><p>Without usable evidence, five personas would only repeat speculation. The result instead states what evidence is needed.</p></div>}
+        </details>)}</div> : <div className="ml-evidence-boundary"><strong>No Council analysis was generated.</strong><p>Without readable source evidence, the result states what evidence is needed instead of inventing a debate.</p></div>}
+        {displayResult.aiAnalysis && <p className="ml-ai-disclosure">{displayResult.aiAnalysis.disclosure}</p>}
       </section>
 
       <section className="ml-synthesis-section" aria-labelledby="synthesis-title">
