@@ -1,6 +1,6 @@
-import { buildEconomicLensQuery } from "../../lib/economicLens.ts";
-
 export type NewsArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
+export type ResearchClaim = { id: string; text: string; category: "Event" | "Cause" | "Consequence" | "Causal hypothesis" };
+type ResearchPlan = { framing: string; claims: ResearchClaim[]; queries: string[] };
 
 const responseHeaders = {
   "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
@@ -134,6 +134,42 @@ async function fromTavily(query: string, apiKey: string): Promise<NewsArticle[]>
   });
 }
 
+async function planResearch(headline: string, apiKey: string): Promise<ResearchPlan> {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    signal: AbortSignal.timeout(5000),
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: "You are MacroLens' research planner. Decompose the submitted headline into complete, neutral, independently researchable claims. Then produce targeted web-search queries that will find primary evidence, independent reporting, the proposed causal mechanism or economic consequence, and counter-evidence. Preserve names, places, dates and quantities exactly. Do not answer or analyse the headline. Do not create generic queries." }] },
+      contents: [{ role: "user", parts: [{ text: headline }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1600,
+        responseMimeType: "application/json",
+        responseSchema: { type: "OBJECT", properties: {
+          framing: { type: "STRING" },
+          claims: { type: "ARRAY", minItems: 1, maxItems: 6, items: { type: "OBJECT", properties: { id: { type: "STRING" }, text: { type: "STRING" }, category: { type: "STRING", enum: ["Event", "Cause", "Consequence", "Causal hypothesis"] } }, required: ["id", "text", "category"] } },
+          queries: { type: "ARRAY", minItems: 3, maxItems: 4, items: { type: "STRING" } },
+        }, required: ["framing", "claims", "queries"] },
+      },
+    }),
+  });
+  if (!response.ok) throw new Error(`GEMINI_RESEARCH_HTTP_${response.status}`);
+  const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  const text = payload.candidates?.[0]?.content?.parts?.find((part) => part.text)?.text;
+  if (!text) throw new Error("GEMINI_RESEARCH_EMPTY");
+  const raw = JSON.parse(text) as Partial<ResearchPlan>;
+  const categories = new Set(["Event", "Cause", "Consequence", "Causal hypothesis"]);
+  const claims = (raw.claims ?? []).slice(0, 6).flatMap((item, index) => {
+    const claimText = String(item?.text || "").replace(/\s+/g, " ").trim().slice(0, 500);
+    const category = String(item?.category || "");
+    return claimText && categories.has(category) ? [{ id: `C${index + 1}`, text: claimText, category: category as ResearchClaim["category"] }] : [];
+  });
+  const queries = [...new Set((raw.queries ?? []).map((query) => String(query).replace(/[^\p{L}\p{N}\s'".-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 280)).filter(Boolean))].slice(0, 4);
+  if (!claims.length || queries.length < 3) throw new Error("GEMINI_RESEARCH_INVALID");
+  return { framing: String(raw.framing || "").trim().slice(0, 700), claims, queries };
+}
+
 function diagnostic(error: unknown) {
   if (error instanceof DOMException && error.name === "TimeoutError") return "timeout";
   if (error instanceof Error && /_HTTP_\d+/.test(error.message)) return error.message.toLowerCase();
@@ -148,69 +184,23 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return Response.json({ articles: [], provider: "none", limitation: "Invalid request." }, { status: 400, headers: responseHeaders }); }
   const rawQuery = body.query?.trim().slice(0, 500) || "";
   if (!rawQuery) return Response.json({ articles: [], provider: "none", limitation: "A search query is required." }, { status: 400, headers: responseHeaders });
-  const query = buildEconomicLensQuery(rawQuery).replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 320);
-  if (!query) return Response.json({ articles: [], provider: "none", limitation: "A search query is required." }, { status: 400, headers: responseHeaders });
-
   const tavilyKey = process.env.TAVILY_API_KEY;
-  // Tavily returns the clean text it read from real source pages. When it is
-  // configured, return that result immediately instead of waiting for slower
-  // metadata-only feeds; the hosted worker has a short request window.
-  if (tavilyKey) {
-    try {
-      const articles = await fromTavily(query, tavilyKey);
-      if (articles.length) {
-        const hasPublicArticleText = articles.some((article) => article.bodyRead);
-        return Response.json({
-          articles,
-          provider: "Tavily public-source search",
-          retrievalStatus: "live",
-          evidenceDepth: hasPublicArticleText ? "public article text plus metadata" : "headline metadata only",
-          diagnostics: { tavily: "success" },
-        }, { headers: { ...responseHeaders, "X-MacroLens-Source-Depth": hasPublicArticleText ? "public-article-text" : "headline-metadata-only" } });
-      }
-      return Response.json({
-        articles: [],
-        provider: "offline",
-        retrievalStatus: "unavailable",
-        evidenceDepth: "none",
-        diagnostics: { tavily: "empty" },
-        limitation: "LIVE RETRIEVAL UNAVAILABLE. Tavily did not return a usable public source for this headline. No curated evidence has been substituted.",
-      }, { headers: responseHeaders });
-    } catch (error) {
-      return Response.json({
-        articles: [],
-        provider: "offline",
-        retrievalStatus: "unavailable",
-        evidenceDepth: "none",
-        diagnostics: { tavily: diagnostic(error) },
-        limitation: "LIVE RETRIEVAL UNAVAILABLE. Tavily did not return a usable public source for this headline. No curated evidence has been substituted.",
-      }, { headers: responseHeaders });
-    }
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!tavilyKey || !geminiKey) return Response.json({ articles: [], provider: "unavailable", limitation: "Gemini-planned Tavily research is not configured." }, { status: 503, headers: responseHeaders });
+  try {
+    const researchPlan = await planResearch(rawQuery, geminiKey);
+    const outcomes = await Promise.allSettled(researchPlan.queries.map((query) => fromTavily(query, tavilyKey)));
+    const seen = new Set<string>();
+    const articles = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? outcome.value : []).filter((article) => {
+      const key = article.url.replace(/#.*$/, "").replace(/\/$/, "");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 8);
+    if (!articles.length) throw new Error("TAVILY_RESEARCH_EMPTY");
+    const hasPublicArticleText = articles.some((article) => article.bodyRead);
+    return Response.json({ articles, researchPlan, provider: "Gemini-planned Tavily research", retrievalStatus: "live", evidenceDepth: hasPublicArticleText ? "public article text plus metadata" : "headline metadata only", diagnostics: { geminiResearchPlanner: "success", tavilyQueries: `${outcomes.filter((outcome) => outcome.status === "fulfilled").length}/${outcomes.length} completed` } }, { headers: { ...responseHeaders, "X-MacroLens-Source-Depth": hasPublicArticleText ? "public-article-text" : "headline-metadata-only" } });
+  } catch (error) {
+    return Response.json({ articles: [], provider: "unavailable", retrievalStatus: "unavailable", evidenceDepth: "none", diagnostics: { geminiTavilyResearch: diagnostic(error) }, limitation: "Gemini could not complete the Tavily research plan. No rule-based or curated sources were substituted." }, { status: 502, headers: responseHeaders });
   }
-
-  // Google News and GDELT remain an honest no-key fallback for local builds.
-  const providers = [["Google News RSS", "googleNews", fromGoogleNews], ["GDELT DOC 2.0", "gdelt", fromGdelt]] as const;
-  const settled = await Promise.allSettled(providers.map(([, , load]) => load(query)));
-  const diagnostics: Record<string, string> = {};
-  for (const [index, outcome] of settled.entries()) {
-    const [provider, diagnosticKey] = providers[index];
-    if (outcome.status === "fulfilled") {
-      diagnostics[diagnosticKey] = outcome.value.length ? "success" : "empty";
-      if (outcome.value.length) {
-        const articles = outcome.value;
-        return Response.json({ articles, provider, retrievalStatus: "live", evidenceDepth: articles.some((article) => article.bodyRead) ? "public article text plus metadata" : "headline metadata only", diagnostics }, { headers: responseHeaders });
-      }
-    } else {
-      diagnostics[diagnosticKey] = diagnostic(outcome.reason);
-    }
-  }
-
-  return Response.json({
-    articles: [],
-    provider: "offline",
-    retrievalStatus: "unavailable",
-    evidenceDepth: "none",
-    diagnostics,
-    limitation: "LIVE RETRIEVAL UNAVAILABLE. The public feeds did not return usable sources. No curated evidence has been substituted.",
-  }, { headers: responseHeaders });
 }

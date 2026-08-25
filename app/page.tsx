@@ -2,11 +2,10 @@
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import ResultExperience from "./components/ResultExperience";
 import { demoCases, findDemoCase, type AnalysisResult, type UserProfile } from "./data/demoCases";
-import { buildLiveAnalysis, detectLanguage, type RetrievedArticle } from "./lib/analysis";
+import { buildLiveAnalysis, detectLanguage, type PlannedClaim, type RetrievedArticle } from "./lib/analysis";
 import { applyGeminiAnalysis } from "./lib/geminiAnalysis";
 import { userProfiles } from "./lib/resultExperience";
 import { cropCanvas, prepareDocumentImage } from "./lib/documentImage";
-import { buildEconomicLensQuery } from "./lib/economicLens";
 import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlternative, cleanOcrText, mergeLayoutAndDetail, validateHeadline, type CropRegion, type HeadlineCandidate, type OcrLineBox } from "./lib/headlineOcr";
 
 type ExplanationLanguage = "English" | "Hindi" | "Marathi";
@@ -29,32 +28,6 @@ function ScanPreview({ src }: { src: string }) {
   // A temporary browser blob URL cannot be routed through the hosted image optimiser.
   // eslint-disable-next-line @next/next/no-img-element
   return <img className="scan-preview" src={src} alt="Newspaper scan preview" />;
-}
-
-async function retrieveDirectFromGdelt(query: string, externalSignal?: AbortSignal): Promise<RetrievedArticle[]> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 6500);
-  const abortFromExternal = () => controller.abort();
-  if (externalSignal?.aborted) controller.abort();
-  externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
-  try {
-    const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=8&format=json&sort=datedesc&timespan=1month`;
-    const response = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
-    if (!response.ok) throw new Error(`GDELT returned ${response.status}`);
-    const payload = await response.json() as { articles?: Array<{ title?: string; url?: string; domain?: string; seendate?: string }> };
-    return (payload.articles ?? []).slice(0, 8).flatMap((article) => {
-      const title = article.title?.trim();
-      const url = article.url?.trim();
-      if (!title || !url || !/^https?:\/\//i.test(url)) return [];
-      const rawDate = article.seendate || "";
-      const date = /^\d{8}/.test(rawDate) ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}` : "Date unavailable";
-      const publisher = article.domain?.replace(/^www\./, "") || "News publisher";
-      return [{ title: title.slice(0, 240), url, publisher, domain: publisher, date }];
-    });
-  } finally {
-    window.clearTimeout(timer);
-    externalSignal?.removeEventListener("abort", abortFromExternal);
-  }
 }
 
 export default function Home() {
@@ -99,7 +72,6 @@ export default function Home() {
   const preparedCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cropDragRef = useRef<CropDrag | null>(null);
   const previewUrlRef = useRef("");
-  const lastDirectRetrievalRef = useRef(0);
   const analysisRunRef = useRef(0);
   const activeRetrievalControllerRef = useRef<AbortController | null>(null);
 
@@ -222,21 +194,11 @@ export default function Home() {
         body: JSON.stringify({ query }),
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`Retrieval returned ${response.status}`);
-      const payload = await response.json() as { articles?: RetrievedArticle[]; provider?: string; limitation?: string; diagnostics?: Record<string, string> };
-      if (payload.articles?.length) return { articles: payload.articles, provider: payload.provider || "Public headline feed", limitation: payload.limitation };
-
-      const cooldown = Math.max(0, 5500 - (Date.now() - lastDirectRetrievalRef.current));
-      if (cooldown) await sleep(cooldown);
-      if (controller.signal.aborted) throw new DOMException("Analysis cancelled", "AbortError");
-      lastDirectRetrievalRef.current = Date.now();
-      try {
-        const directArticles = await retrieveDirectFromGdelt(buildEconomicLensQuery(query), controller.signal);
-        if (directArticles.length) return { articles: directArticles, provider: "GDELT DOC 2.0 · direct browser fallback", limitation: undefined };
-      } catch { /* preserve the server's explicit unavailable state */ }
-
+      const payload = await response.json() as { articles?: RetrievedArticle[]; provider?: string; limitation?: string; diagnostics?: Record<string, string>; researchPlan?: { framing?: string; claims?: PlannedClaim[]; queries?: string[] } };
+      if (!response.ok) throw new Error(payload.limitation || `Research returned ${response.status}`);
+      if (payload.articles?.length && payload.researchPlan?.claims?.length) return { articles: payload.articles, provider: payload.provider || "Gemini-planned Tavily research", limitation: payload.limitation, researchPlan: payload.researchPlan };
       const diagnosticText = payload.diagnostics ? Object.entries(payload.diagnostics).map(([provider, status]) => `${provider}: ${status}`).join(" · ") : "provider diagnostics unavailable";
-      return { articles: [], provider: payload.provider || "offline", limitation: `${payload.limitation || "LIVE RETRIEVAL UNAVAILABLE. No curated evidence has been substituted."} Feed status: ${diagnosticText}.` };
+      throw new Error(`${payload.limitation || "Gemini-planned Tavily research did not return usable evidence."} ${diagnosticText}`);
     } finally {
       window.clearTimeout(timer);
       if (activeRetrievalControllerRef.current === controller) activeRetrievalControllerRef.current = null;
@@ -266,7 +228,7 @@ export default function Home() {
     setResultIsFresh(false);
     setErrorMessage("");
     setPipelineStage("Decomposing claims");
-    setPipelineNote("Separating the headline into individually checkable claims…");
+    setPipelineNote("Gemini is separating the headline into researchable claims and planning targeted Tavily searches…");
 
     if (demo) {
       await sleep(420);
@@ -286,13 +248,13 @@ export default function Home() {
 
     try {
       setPipelineStage("Retrieving evidence");
-      setPipelineNote("Searching public source text for the headline and its business and economic implications…");
+      setPipelineNote("Gemini is planning targeted evidence queries; Tavily will retrieve the resulting public sources…");
       const retrievalController = new AbortController();
       const retrieval = await retrieveArticles(cleanHeadline, retrievalController);
       if (analysisRunRef.current !== runId) return;
       setPipelineStage("Linking evidence");
       setPipelineNote("Checking source eligibility, support, contradiction and evidence gaps…");
-      let liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
+      let liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles, retrieval.researchPlan.claims);
       if (!liveResult.sources.length) throw new Error(retrieval.limitation || "No public sources were retrieved for analysis.");
       setPipelineNote("Gemini 3.5 Flash-Lite is generating the complete result and five structured Council perspectives…");
       const response = await fetch("/api/analyze", {
@@ -310,7 +272,7 @@ export default function Home() {
       setResultIsFresh(true);
       setPipelineStage(retrieval.articles.length ? "Complete" : "Fallback ready");
       setPipelineNote(retrieval.articles.length
-        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}. Gemini 3.5 Flash-Lite generated the complete result and five-role Council analysis.`
+        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} source${retrieval.articles.length === 1 ? "" : "s"} retrieved from ${retrieval.researchPlan.queries?.length || 0} Gemini-planned Tavily queries. Gemini 3.5 Flash-Lite then generated the complete result and five-role Council analysis.`
         : retrieval.limitation || "No close public evidence was retrieved. The insufficient-evidence safeguard is active.");
     } catch (error) {
       if (analysisRunRef.current !== runId) return;
@@ -773,14 +735,14 @@ export default function Home() {
       <section className="method-shell" id="method">
         <div className="method-heading reveal"><span className="section-index">03 / METHOD &amp; TRANSPARENCY</span><h2>AI assists judgement. It does not replace it.</h2><p>The competition build exposes its retrieval depth, evidence role and uncertainty at every important step.</p></div>
         <div className="method-grid reveal">
-          <article><span>01</span><h3>Scope and claim extraction</h3><p>Any custom headline is accepted. Claim extraction preserves the headline; retrieval adds a business-and-economics lens. Curated cases use reviewed claim sets.</p></article>
-          <article><span>02</span><h3>Retrieval</h3><p>MacroLens checks read source text for direct support, explicit contradiction and hedging. Unrated websites stay context; METADATA ONLY RETRIEVED means titles or snippets were available and cannot raise confidence.</p></article>
+          <article><span>01</span><h3>Scope and research planning</h3><p>For each custom headline, Gemini extracts independently researchable claims and plans targeted searches for primary evidence, independent reporting, mechanisms, consequences and counter-evidence. Curated cases use reviewed claim sets.</p></article>
+          <article><span>02</span><h3>Retrieval</h3><p>Tavily executes the Gemini-planned queries and returns deduplicated public sources and readable excerpts. The second Gemini call assesses each source against each planned claim; metadata-only material remains explicitly identified.</p></article>
           <article><span>03</span><h3>AI usage</h3><p>Tesseract.js reads selected headline regions. For custom headlines, Gemini 3.5 Flash-Lite generates the complete structured result in one call: claim and source assessments, Bottom Line, story, profile relevance, causal map, confidence, stress test and five Council perspectives. Source and claim IDs are validated before rendering.</p></article>
           <article><span>04</span><h3>Privacy</h3><p>Uploaded images are processed in the browser, shown via a temporary object URL and not sent to the MacroLens server.</p></article>
           <article><span>05</span><h3>Confidence</h3><p>High requires complete factual-claim coverage from eligible source text, no eligible contradiction and no unresolved causal claim. Counts alone cannot make confidence High.</p></article>
           <article><span>06</span><h3>Capability boundary</h3><p>Every headline is accepted, but MacroLens reports only evidence-linked business and economic pathways. If none is supported, it says so. Metadata is not claim verification.</p></article>
         </div>
-        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · Gemini 3.5 Flash-Lite · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily retrieves public sources. Gemini generates every analytical field for custom results in one structured call, including five Council roles that are perspectives from one model rather than independent agents.</small></div>
+        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · Gemini 3.5 Flash-Lite · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Gemini first plans claims and targeted Tavily queries, then a second structured Gemini call generates every custom analytical field, including five Council roles that are perspectives from one model rather than independent agents.</small></div>
       </section>
 
       <footer className="site-footer"><div><span className="brand-mark">ML</span><p><strong>MacroLens</strong><small>See beyond the story. Understand the system.</small></p></div><span>HKU AI+ Challenge · Competition build under review · August 2026</span></footer>

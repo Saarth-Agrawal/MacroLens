@@ -7,7 +7,7 @@ Last audited: 25 August 2026
 | System | Where used | What it does | User-visible disclosure | Required for demo? |
 |---|---|---|---|---|
 | Tesseract.js 7 with Tesseract LSTM language models | Browser | Neural-network OCR for English, Hindi and Marathi newspaper text | Lens panel and Method section | Only for image input |
-| Gemini 3.5 Flash-Lite | Server | Generates the complete custom result—including evidence assessments, Bottom Line, story, relevance, causal hypotheses, confidence, stress test and five Council perspectives—in one structured call | Result and Method sections identify the model, one-call design and validated-ID boundary | Required for custom analysis |
+| Gemini 3.5 Flash-Lite | Server | First decomposes the headline and plans targeted Tavily searches; a second structured call generates the complete custom result | Result and Method sections identify the two-stage design and validated-ID boundary | Required for custom research and analysis |
 | Rule-based claim decomposition | Browser | Splits recognised causal connectors into event, cause and causal-link claims | Live results are labelled provisional | Yes for arbitrary headlines; this is not described as AI |
 | Human-reviewed curated case data | Browser bundle | Supplies the three stable demo maps and evidence ledgers | Every case is labelled “Curated demo · pre-verified” | Yes for the competition demo |
 
@@ -29,10 +29,8 @@ Gemini returns claim and source assessments, citations and calibrated confidence
 | TypeScript 5.9.3 | Type checking | Apache-2.0; no licence fee |
 | Tesseract.js 7.0.0 | Browser OCR | Apache-2.0; no licence fee |
 | Inter, Sora and Noto Sans Devanagari via Fontsource | Latin and Devanagari typography | OFL-1.1; self-hosted in the bundle |
-| Tavily Search | Live public-source search and clean parsed text | Optional server-side API key; usage/plan must be disclosed before competition deployment |
-| Gemini 3.5 Flash-Lite | Evidence-grounded analysis and Council perspectives | Server-side API key; usage, quota and competition eligibility must be re-audited before final submission |
-| GDELT DOC 2.0 | Public recent headline metadata fallback | Public service; no API key or paid plan used |
-| Google News RSS | Retrieval fallback | Public feed; no API key or paid plan used |
+| Tavily Search | Executes Gemini-planned public-source searches and returns clean parsed text | Server-side API key; usage/plan must be disclosed before competition deployment |
+| Gemini 3.5 Flash-Lite | Research planning, evidence-grounded analysis and Council perspectives | Server-side API key; usage, quota and competition eligibility must be re-audited before final submission |
 | RBI, IMF, World Bank, IEA and St. Louis Fed pages | Primary/context evidence | Public pages; linked, not republished |
 | Reuters article links | Independent reporting | Public article links and short paraphrases; no paid data feed |
 | Cloudflare/Vinext Sites runtime | Hosting/build target | Existing project runtime; no app-level paid API dependency |
@@ -45,8 +43,9 @@ Tavily and Gemini are configured only through server-side environment variables 
 - Images are displayed with a temporary blob URL and are not sent to a MacroLens API.
 - The blob URL is revoked when replaced, cleared or when the page is closed.
 - The server receives only a cleaned search query for custom live retrieval.
-- When configured, Tavily receives the custom query and retrieves public-source text for claim matching.
-- When readable excerpts are available, Gemini receives the headline, decomposed claims, selected profile and displayed source excerpts. It does not receive uploaded images.
+- Gemini first receives the custom headline and returns researchable claims plus targeted Tavily queries.
+- Tavily receives those planned queries and retrieves public-source text.
+- Gemini then receives the headline, planned claims, selected profile and displayed source excerpts. It does not receive uploaded images.
 - The current version has no user accounts, database-backed scan history or analytics.
 
 ## Known limitations to disclose

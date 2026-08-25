@@ -3,6 +3,7 @@ import { enrichAnalysisResult } from "./resultExperience.ts";
 
 export type DetectedLanguage = "English" | "Hindi" | "Marathi";
 export type RetrievedArticle = { title: string; url: string; publisher: string; domain: string; date: string; excerpt?: string; bodyRead?: boolean };
+export type PlannedClaim = { id: string; text: string; category: ClaimCategory };
 
 const stopWords = new Set([
   "the", "a", "an", "and", "or", "as", "after", "because", "amid", "following", "due", "to", "of", "in", "on", "for", "with", "at", "by",
@@ -397,10 +398,17 @@ function economicCausalFrame(headline: string): EconomicCausalFrame {
   };
 }
 
-export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[]): AnalysisResult {
+export function buildLiveAnalysis(headline: string, articles: RetrievedArticle[], plannedClaims?: PlannedClaim[]): AnalysisResult {
   const language = detectLanguage(headline);
   const causalFrame = economicCausalFrame(headline);
-  const claims = decomposeHeadline(headline);
+  const claims = plannedClaims?.length ? plannedClaims.slice(0, 8).map((planned, index) => ({
+    id: `C${index + 1}`,
+    text: sentence(planned.text),
+    category: planned.category,
+    kind: planned.category === "Causal hypothesis" ? "Causal hypothesis" as const : "Unverified claim" as const,
+    evidenceIds: [],
+    isHeadlineClaim: true,
+  })) : decomposeHeadline(headline);
   const sources = makeEvidenceSources(claims, articles);
   const contextualIds = sources.filter((source) => source.evidenceRole !== "Insufficient evidence").map((source) => source.id);
   const fullTextSources = sources.filter((source) => source.verificationDepth === "full-text");
