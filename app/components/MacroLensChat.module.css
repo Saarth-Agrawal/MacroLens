@@ -1,0 +1,52 @@
+.root { position: fixed; right: 24px; bottom: 22px; z-index: 90; font-family: var(--font-ui); }
+.launcher { position: relative; display: grid; grid-template-columns: 38px auto; gap: 9px; align-items: center; min-width: 102px; height: 58px; padding: 7px 14px 7px 8px; color: var(--parchment); background: #152a42; border: 1px solid #52657a; border-bottom-color: #07111d; border-radius: 5px; box-shadow: 0 5px 0 #07111d, 0 12px 24px rgba(0, 0, 0, .38); cursor: pointer; }
+.launcher:hover { background: #1a3451; transform: translateY(-1px); }
+.launcher:active { transform: translateY(4px); box-shadow: 0 1px 0 #07111d, 0 5px 12px rgba(0, 0, 0, .3); }
+.launcher > span, .mark { display: grid; place-items: center; width: 38px; height: 38px; color: #f7f2e4; background: #294c6d; border: 1px solid #8291a0; border-radius: 50%; box-shadow: inset 0 0 0 3px #13283d, 0 2px 0 #07111d; font-family: var(--font-mono); font-size: 11px; font-weight: 900; }
+.launcher > i { position: absolute; top: 9px; left: 38px; width: 7px; height: 7px; background: #78b28b; border: 2px solid #14283d; border-radius: 50%; }
+.launcher > b { font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.panel { position: absolute; right: 0; bottom: 75px; display: grid; grid-template-rows: auto auto minmax(210px, 1fr) auto; width: min(390px, calc(100vw - 30px)); height: min(590px, calc(100vh - 120px)); overflow: hidden; color: var(--ink); background: var(--parchment); border: 1px solid #6f7880; border-top: 5px solid #1b3551; border-radius: 4px; box-shadow: 0 26px 70px rgba(0, 0, 0, .58), 0 7px 0 #07111d; }
+.panel::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .04; background-image: var(--grain-fine); }
+.header { position: relative; z-index: 1; display: grid; grid-template-columns: 42px 1fr 34px; gap: 11px; align-items: center; padding: 15px 15px 13px; color: var(--parchment); background: #172b44; border-bottom: 1px solid #091725; }
+.mark { width: 40px; height: 40px; }
+.header div { display: grid; gap: 2px; }
+.header strong { font-family: var(--font-display); font-size: 16px; }
+.header small { color: #aebccc; font-family: var(--font-mono); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.header button { width: 33px; height: 33px; padding: 0; color: #e9e3d7; background: #253b53; border: 1px solid #657487; border-radius: 3px; cursor: pointer; font-size: 21px; line-height: 1; }
+.contextStrip { position: relative; z-index: 1; display: flex; gap: 8px; align-items: center; padding: 8px 15px; color: #56616a; background: #e8e2d4; border-bottom: 1px solid #c5bcaa; font-family: var(--font-mono); font-size: 8px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.contextStrip i { width: 7px; height: 7px; background: #4d7657; border-radius: 50%; box-shadow: 0 0 0 2px #cbd6c8; }
+.messages { position: relative; z-index: 1; display: grid; gap: 12px; align-content: start; overflow-y: auto; padding: 17px 15px; background: linear-gradient(rgba(247, 242, 228, .93), rgba(238, 231, 210, .93)); }
+.welcome { padding: 17px; background: #fbf6ea; border: 1px solid #bbb2a1; border-left: 4px solid #254c72; box-shadow: 0 2px 0 #c6bdac; }
+.welcome span { color: #28557f; font-family: var(--font-mono); font-size: 8px; font-weight: 900; letter-spacing: .11em; }
+.welcome strong { display: block; margin-top: 8px; color: #252c33; font-family: var(--font-display); font-size: 17px; }
+.welcome p { margin: 7px 0 0; color: #5e6264; font-size: 12px; line-height: 1.55; }
+.messages article { max-width: 90%; padding: 11px 12px; border-radius: 3px; }
+.messages article > span { display: block; margin-bottom: 5px; font-family: var(--font-mono); font-size: 7px; font-weight: 900; letter-spacing: .1em; }
+.messages article p { margin: 0; white-space: pre-wrap; font-size: 12px; line-height: 1.6; }
+.user { justify-self: end; color: #f5f0e4; background: #1b3652; border: 1px solid #10263b; box-shadow: 0 2px 0 #081522; }
+.user > span { color: #aebfd0; }
+.assistant { justify-self: start; color: #30363b; background: #fffaf0; border: 1px solid #b8af9f; border-left: 3px solid #315b82; box-shadow: 0 2px 0 #c7bead; }
+.assistant > span { color: #27547d; }
+.typing { display: flex; align-items: center; gap: 5px; color: #687078; font-size: 10px; }
+.typing i { width: 6px; height: 6px; background: #315b82; border-radius: 50%; animation: pulse 1.1s infinite; }
+.typing i:nth-child(2) { animation-delay: .15s; }.typing i:nth-child(3) { animation-delay: .3s; }.typing span { margin-left: 5px; }
+.error { padding: 10px 12px; color: #78372e; background: #f3e3dd; border: 1px solid #c9a099; font-size: 11px; line-height: 1.45; }
+.composer { position: relative; z-index: 1; padding: 13px 14px 14px; background: #e7e0d1; border-top: 1px solid #bdb4a4; }
+.composer > label { display: block; margin-bottom: 7px; color: #32485d; font-family: var(--font-mono); font-size: 8px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.composer > div { display: grid; grid-template-columns: 1fr 40px; gap: 7px; }
+.composer input { min-width: 0; height: 42px; padding: 9px 11px; color: #252b30; background: #fffaf0; border: 1px solid #8e8a80; border-radius: 3px; outline: none; font-size: 12px; }
+.composer input:focus { border-color: #315b82; box-shadow: 0 0 0 2px rgba(49, 91, 130, .18); }
+.composer button { height: 42px; color: #f6f0e4; background: #1b3856; border: 1px solid #0d2236; border-radius: 3px; box-shadow: 0 3px 0 #091725; cursor: pointer; font-size: 20px; }
+.composer button:disabled { cursor: not-allowed; opacity: .45; }
+.composer > small { display: block; margin-top: 8px; color: #74736e; font-size: 8px; line-height: 1.45; }
+@keyframes pulse { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+
+@media (max-width: 600px) {
+  .root { right: 14px; bottom: 14px; }
+  .launcher { min-width: 58px; width: 58px; padding: 7px 9px; grid-template-columns: 38px; }
+  .launcher > b { display: none; }
+  .launcher > i { left: 38px; }
+  .panel { right: -1px; bottom: 72px; width: calc(100vw - 28px); height: min(620px, calc(100vh - 104px)); }
+}
+
+@media (prefers-reduced-motion: reduce) { .typing i { animation: none; } }

@@ -1,6 +1,7 @@
 "use client";
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import ResultExperience from "./components/ResultExperience";
+import MacroLensChat from "./components/MacroLensChat";
 import { demoCases, findDemoCase, type AnalysisResult, type UserProfile } from "./data/demoCases";
 import { buildLiveAnalysis, detectLanguage, type PlannedClaim, type RetrievedArticle } from "./lib/analysis";
 import { applyGeminiAnalysis } from "./lib/geminiAnalysis";
@@ -746,6 +747,7 @@ export default function Home() {
       </section>
 
       <footer className="site-footer"><div><span className="brand-mark">ML</span><p><strong>MacroLens</strong><small>See beyond the story. Understand the system.</small></p></div><span>HKU AI+ Challenge · Competition build under review · August 2026</span></footer>
+      <MacroLensChat headline={headline} result={hasCurrentResult ? result : null} />
     </main>
   );
 }
