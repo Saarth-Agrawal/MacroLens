@@ -27,6 +27,15 @@
 .user > span { color: #aebfd0; }
 .assistant { justify-self: start; color: #30363b; background: #fffaf0; border: 1px solid #b8af9f; border-left: 3px solid #315b82; box-shadow: 0 2px 0 #c7bead; }
 .assistant > span { color: #27547d; }
+.webSources { display: grid; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #d1c8b7; }
+.webSources > b { color: #315b82; font-family: var(--font-mono); font-size: 7px; letter-spacing: .1em; }
+.webSources a { display: grid; grid-template-columns: 26px 1fr 14px; gap: 7px; align-items: center; padding: 7px; color: #29343e; background: #ece7db; border: 1px solid #c5bdad; text-decoration: none; }
+.webSources a:hover { background: #e1e8ed; border-color: #9facb7; }
+.webSources a > span { color: #234f79; font-family: var(--font-mono); font-size: 8px; font-weight: 900; }
+.webSources a p { display: grid; gap: 2px; margin: 0; line-height: 1.25; }
+.webSources a strong { overflow: hidden; color: #333a40; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.webSources a small { overflow: hidden; color: #77766f; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.webSources a > i { color: #315b82; font-style: normal; font-size: 11px; }
 .typing { display: flex; align-items: center; gap: 5px; color: #687078; font-size: 10px; }
 .typing i { width: 6px; height: 6px; background: #315b82; border-radius: 50%; animation: pulse 1.1s infinite; }
 .typing i:nth-child(2) { animation-delay: .15s; }.typing i:nth-child(3) { animation-delay: .3s; }.typing span { margin-left: 5px; }
