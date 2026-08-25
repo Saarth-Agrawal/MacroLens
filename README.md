@@ -12,7 +12,7 @@ The competition flow turns a typed, pasted or scanned headline into checkable cl
 - Vinext/Vite build targeting a Cloudflare Worker
 - Tesseract.js 7 on-device OCR (`eng`, `hin`, `mar`)
 - Tavily public-source search and clean-text retrieval when `TAVILY_API_KEY` is configured, with GDELT DOC 2.0 and Google News RSS fallbacks
-- One evidence-grounded Gemini 3.5 Flash-Lite call for five structured Council perspectives when `GEMINI_API_KEY` is configured
+- One evidence-grounded Gemini 3.5 Flash-Lite call for the complete custom result, including claim and source assessments, Bottom Line, story, profile relevance, causal map, confidence, stress test and five Council perspectives
 - No database, accounts or image uploads to the server
 - Three fixed pre-verified competition cases in `app/data/demoCases.ts`
 - Conservative live evidence mode that applies a business and economics lens to any headline

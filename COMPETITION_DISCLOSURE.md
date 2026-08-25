@@ -7,11 +7,11 @@ Last audited: 25 August 2026
 | System | Where used | What it does | User-visible disclosure | Required for demo? |
 |---|---|---|---|---|
 | Tesseract.js 7 with Tesseract LSTM language models | Browser | Neural-network OCR for English, Hindi and Marathi newspaper text | Lens panel and Method section | Only for image input |
-| Gemini 3.5 Flash-Lite | Server | Generates five structured Council perspectives, a synthesis and causal hypotheses from retrieved article excerpts in one model call | Result and Method sections identify the model, one-call design and evidence boundary | Used for custom analysis when readable source text is available |
+| Gemini 3.5 Flash-Lite | Server | Generates the complete custom result—including evidence assessments, Bottom Line, story, relevance, causal hypotheses, confidence, stress test and five Council perspectives—in one structured call | Result and Method sections identify the model, one-call design and validated-ID boundary | Required for custom analysis |
 | Rule-based claim decomposition | Browser | Splits recognised causal connectors into event, cause and causal-link claims | Live results are labelled provisional | Yes for arbitrary headlines; this is not described as AI |
 | Human-reviewed curated case data | Browser bundle | Supplies the three stable demo maps and evidence ledgers | Every case is labelled “Curated demo · pre-verified” | Yes for the competition demo |
 
-Gemini does not control claim verification, citations or confidence. The five Council roles are perspectives generated in one call, not five independent agents. Causal hypotheses remain labelled and reviewable.
+Gemini returns claim and source assessments, citations and calibrated confidence inside a strict schema. The server removes unknown source or claim IDs before rendering. The five Council roles are perspectives generated in one call, not five independent agents. Causal hypotheses remain labelled and reviewable.
 
 ## AI used to develop the project
 
@@ -54,7 +54,7 @@ Tavily and Gemini are configured only through server-side environment variables 
 - Tavily may return cleaned public-source text, but it cannot read every page; paywalled, blocked and incomplete sources remain metadata-only.
 - Live sources are labelled “Supports” only when verification-eligible read text makes a direct, non-negated, stance-clear match. Unrated sites, search snippets and title metadata are excluded from support and confidence.
 - The live rules detect explicit negation, refutation cues, hedging and directional conflict. Subtle contradiction, satire and arbitrary semantic verification still require article-level human review.
-- Gemini Council text is model-generated and may contain analytical errors; it is constrained to hypotheses and cannot promote claims or invent usable evidence links.
+- Gemini analysis may contain analytical errors. Unknown evidence and claim IDs are rejected, but users must still inspect the original sources before relying on a result.
 - Full-result Hindi and Marathi translation is not complete; curated short previews are machine-generated and labelled.
 - OCR accuracy depends on crop, angle, typography and lighting. Users must confirm the extracted text.
 - The three curated cases are stable demonstration content, not live results.

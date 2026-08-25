@@ -408,12 +408,46 @@ export function deriveResultLayers(result: CoreAnalysisResult, profile: UserProf
   return { selectedProfile: profile, profileRelevance, bottomLine, visualStory, councilPerspectives, councilSynthesis, reflectionPrompts };
 }
 
+function applyGeminiPresentation(result: CoreAnalysisResult, layers: ResultLayers, profile: UserProfile): ResultLayers {
+  const analysis = result.aiAnalysis;
+  if (!analysis) return layers;
+  const profileRelevance = analysis.story.profileRelevance.find((item) => item.profile === profile)
+    ?? analysis.story.profileRelevance.find((item) => item.profile === "General reader");
+  const whyYouCare = profileRelevance ?? layers.profileRelevance[profile];
+  return {
+    ...layers,
+    selectedProfile: profile,
+    bottomLine: {
+      ...layers.bottomLine,
+      explanation: analysis.bottomLine.explanation,
+      evidenceStatus: analysis.verdict,
+      keyImplication: analysis.bottomLine.keyImplication,
+      keyUncertainty: analysis.bottomLine.keyUncertainty,
+    },
+    visualStory: {
+      whatHappened: analysis.story.whatHappened,
+      why: analysis.story.why,
+      whatNext: analysis.story.whatNext,
+      whyYouCare: {
+        text: whyYouCare.text,
+        userProfile: profile,
+        exposureType: whyYouCare.exposureType,
+        conditions: whyYouCare.conditions,
+        timeHorizon: whyYouCare.timeHorizon,
+        evidenceIds: whyYouCare.evidenceIds,
+      },
+    },
+  };
+}
+
 export function enrichAnalysisResult(result: CoreAnalysisResult, profile: UserProfile = "General reader"): AnalysisResult {
-  return { ...result, ...deriveResultLayers(result, profile) };
+  const layers = applyGeminiPresentation(result, deriveResultLayers(result, profile), profile);
+  return { ...result, ...layers };
 }
 
 export function withUserProfile(result: AnalysisResult, profile: UserProfile): AnalysisResult {
-  return { ...result, ...deriveResultLayers(result, profile) };
+  const layers = applyGeminiPresentation(result, deriveResultLayers(result, profile), profile);
+  return { ...result, ...layers };
 }
 
 export type ExplanationLanguage = "English" | "Hindi" | "Marathi";

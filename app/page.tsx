@@ -11,7 +11,7 @@ import { bodyTextWarning, buildHeadlineCandidates, chooseVisualConfusableAlterna
 
 type ExplanationLanguage = "English" | "Hindi" | "Marathi";
 type InputMode = "text" | "lens";
-type PipelineStage = "Ready" | "Reading image" | "Decomposing claims" | "Retrieving evidence" | "Linking evidence" | "Complete" | "Fallback ready";
+type PipelineStage = "Ready" | "Reading image" | "Decomposing claims" | "Retrieving evidence" | "Linking evidence" | "Complete" | "Fallback ready" | "Analysis unavailable";
 type CropDrag = { mode: "new" | "move" | "resize"; startX: number; startY: number; start: CropRegion; corner?: "nw" | "ne" | "sw" | "se" };
 
 const stageOrder: PipelineStage[] = ["Decomposing claims", "Retrieving evidence", "Linking evidence", "Complete"];
@@ -293,34 +293,32 @@ export default function Home() {
       setPipelineStage("Linking evidence");
       setPipelineNote("Checking source eligibility, support, contradiction and evidence gaps…");
       let liveResult = buildLiveAnalysis(cleanHeadline, retrieval.articles);
-      const readableSources = liveResult.sources.filter((source) => source.verificationDepth === "full-text" && source.excerpt);
-      if (readableSources.length) {
-        setPipelineNote("Gemini 3.5 Flash-Lite is challenging the evidence through five structured Council perspectives…");
-        try {
-          const response = await fetch("/api/analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: retrievalController.signal,
-            body: JSON.stringify({ headline: cleanHeadline, language: liveResult.detectedLanguage, profile: selectedProfile, claims: liveResult.claims, sources: readableSources }),
-          });
-          const payload = await response.json() as { available?: boolean; analysis?: NonNullable<AnalysisResult["aiAnalysis"]> };
-          if (analysisRunRef.current !== runId) return;
-          if (response.ok && payload.available && payload.analysis) liveResult = applyGeminiAnalysis(liveResult, payload.analysis);
-        } catch { /* preserve the deterministic evidence result */ }
-      }
+      if (!liveResult.sources.length) throw new Error(retrieval.limitation || "No public sources were retrieved for analysis.");
+      setPipelineNote("Gemini 3.5 Flash-Lite is generating the complete result and five structured Council perspectives…");
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: retrievalController.signal,
+        body: JSON.stringify({ headline: cleanHeadline, language: liveResult.detectedLanguage, profile: selectedProfile, claims: liveResult.claims, sources: liveResult.sources }),
+      });
+      const payload = await response.json() as { available?: boolean; analysis?: NonNullable<AnalysisResult["aiAnalysis"]>; reason?: string };
+      if (analysisRunRef.current !== runId) return;
+      if (!response.ok || !payload.available || !payload.analysis) throw new Error(payload.reason || "Gemini returned an incomplete analysis.");
+      liveResult = applyGeminiAnalysis(liveResult, payload.analysis);
+      if (!liveResult.aiAnalysis) throw new Error("Gemini returned an incomplete analysis structure.");
       setResult(liveResult);
       setResultIsFresh(true);
       setPipelineStage(retrieval.articles.length ? "Complete" : "Fallback ready");
       setPipelineNote(retrieval.articles.length
-        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}.${liveResult.aiAnalysis ? " Gemini 3.5 Flash-Lite generated the five-role Council analysis." : " Evidence-only fallback used."} Unrated sites and metadata-only results do not affect confidence.`
+        ? `LIVE ANALYSIS · ${retrieval.provider}: ${retrieval.articles.length} recent result${retrieval.articles.length === 1 ? "" : "s"}. Gemini 3.5 Flash-Lite generated the complete result and five-role Council analysis.`
         : retrieval.limitation || "No close public evidence was retrieved. The insufficient-evidence safeguard is active.");
-    } catch {
+    } catch (error) {
       if (analysisRunRef.current !== runId) return;
-      const fallback = buildLiveAnalysis(cleanHeadline, []);
-      setResult(fallback);
-      setResultIsFresh(true);
-      setPipelineStage("Fallback ready");
-      setPipelineNote("Live retrieval failed. No blank screen and no invented answer: use Retry or one of the curated demos.");
+      setResultIsFresh(false);
+      setPipelineStage("Analysis unavailable");
+      const message = error instanceof Error ? error.message : "The complete Gemini analysis could not be generated.";
+      setPipelineNote(message);
+      setErrorMessage(`${message} Try again or use a curated demonstration.`);
     } finally {
       if (analysisRunRef.current !== runId) return;
       setIsAnalysing(false);
@@ -777,12 +775,12 @@ export default function Home() {
         <div className="method-grid reveal">
           <article><span>01</span><h3>Scope and claim extraction</h3><p>Any custom headline is accepted. Claim extraction preserves the headline; retrieval adds a business-and-economics lens. Curated cases use reviewed claim sets.</p></article>
           <article><span>02</span><h3>Retrieval</h3><p>MacroLens checks read source text for direct support, explicit contradiction and hedging. Unrated websites stay context; METADATA ONLY RETRIEVED means titles or snippets were available and cannot raise confidence.</p></article>
-          <article><span>03</span><h3>AI usage</h3><p>Tesseract.js reads selected headline regions. For custom headlines with readable source text, Gemini 3.5 Flash-Lite generates five structured Council perspectives in one call. It cannot change rule-controlled claim status, citations or confidence.</p></article>
+          <article><span>03</span><h3>AI usage</h3><p>Tesseract.js reads selected headline regions. For custom headlines, Gemini 3.5 Flash-Lite generates the complete structured result in one call: claim and source assessments, Bottom Line, story, profile relevance, causal map, confidence, stress test and five Council perspectives. Source and claim IDs are validated before rendering.</p></article>
           <article><span>04</span><h3>Privacy</h3><p>Uploaded images are processed in the browser, shown via a temporary object URL and not sent to the MacroLens server.</p></article>
           <article><span>05</span><h3>Confidence</h3><p>High requires complete factual-claim coverage from eligible source text, no eligible contradiction and no unresolved causal claim. Counts alone cannot make confidence High.</p></article>
           <article><span>06</span><h3>Capability boundary</h3><p>Every headline is accepted, but MacroLens reports only evidence-linked business and economic pathways. If none is supported, it says so. Metadata is not claim verification.</p></article>
         </div>
-        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · Gemini 3.5 Flash-Lite · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily retrieves public-source text. Gemini generates structured analysis only when readable excerpts are available; one call produces all five Council roles, which are not independent agents.</small></div>
+        <div className="resource-disclosure"><strong>Audited resource disclosure</strong><span>Next.js · React · TypeScript · Tesseract.js · Tavily · Gemini 3.5 Flash-Lite · GDELT DOC 2.0 · Google News RSS · Sora, Inter and Noto Sans Devanagari (OFL)</span><small>Tavily retrieves public sources. Gemini generates every analytical field for custom results in one structured call, including five Council roles that are perspectives from one model rather than independent agents.</small></div>
       </section>
 
       <footer className="site-footer"><div><span className="brand-mark">ML</span><p><strong>MacroLens</strong><small>See beyond the story. Understand the system.</small></p></div><span>HKU AI+ Challenge · Competition build under review · August 2026</span></footer>

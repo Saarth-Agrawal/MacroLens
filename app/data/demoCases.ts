@@ -124,8 +124,23 @@ export type CouncilSynthesis = {
 
 export type GeminiAnalysis = {
   model: "gemini-3.5-flash-lite";
+  verdict: EvidenceStatus;
   framing: string;
+  bottomLine: { explanation: string; keyImplication: string; keyUncertainty: string };
+  claimAssessments: Array<{ id: string; kind: StatementKind; evidenceIds: string[]; rationale: string }>;
+  sourceAssessments: Array<{ id: string; evidenceRole: EvidenceRole; relatedClaims: string[]; note: string }>;
   nodes: CausalNode[];
+  story: {
+    whatHappened: { text: string; status: StatementKind; evidenceIds: string[] };
+    why: { text: string; supportType: StatementKind; conditions: string; evidenceIds: string[] };
+    whatNext: { text: string; timeHorizon: string; indicators: string[]; uncertainty: string; evidenceIds: string[] };
+    profileRelevance: ProfileRelevance[];
+  };
+  whyItMatters: string[];
+  winners: string[];
+  losers: string[];
+  stressTest: CoreAnalysisResult["stressTest"];
+  confidence: CoreAnalysisResult["confidence"];
   perspectives: CouncilPerspective[];
   synthesis: CouncilSynthesis;
   disclosure: string;
